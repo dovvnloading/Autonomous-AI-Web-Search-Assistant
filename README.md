@@ -7,7 +7,8 @@
 An intelligent desktop application that enhances local LLMs with real-time, autonomous web search capabilities. This project implements a sophisticated Retrieval-Augmented Generation (RAG) system using a **multi-agent architecture** to deliver accurate, up-to-date, and fully cited answers.
 
  
-*(A representative image of the application UI)*
+<img width="1272" height="804" alt="Screenshot 2025-08-19 072814" src="https://github.com/user-attachments/assets/32b76a4f-eaf3-46a8-b6c5-183a97f2b671" />
+
 
 ## About The Project
 

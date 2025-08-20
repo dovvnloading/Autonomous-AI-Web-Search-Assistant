@@ -1,4 +1,4 @@
-# Autonomous AI Web Search Assistant
+
 
 ![Python](https://img.shields.io/badge/python-3.10+-blue.svg)
 ![PySide6](https://img.shields.io/badge/Qt-PySide6-brightgreen.svg)
@@ -7,9 +7,18 @@
 
 ---
 
-This repository contains the source code for a sophisticated, locally-run Autonomous AI Web Search Assistant. Built with Python and PySide6, this application leverages a multi-agent system powered by local language models via Ollama to provide real-time, context-aware, and verifiable answers to user queries by actively searching the web.
+# Autonomous AI Web Search Assistant  
+*An open-source, privacy-first alternative to Perplexity & ChatGPT’s web mode — powered by local models, multi-agent intelligence, and real-time search.*  
 
-Unlike traditional chatbots, this assistant uses an internal chain of thought to plan, execute, validate, and synthesize information from web sources, providing users with accurate, up-to-date responses complete with source citations.
+Unlike typical AI chatbots, this assistant doesn’t just “guess” answers. It **plans, searches, validates, and cites sources** — all while running entirely on your machine. That means:  
+- **Up-to-date answers** from live web searches  
+- **Trustworthy results** with transparent citations  
+- **Full privacy** — no data ever leaves your computer  
+- **Agentic reasoning** with specialized planner, orchestrator, and validator roles  
+- **Hybrid memory** so it remembers context across chats  
+
+Think of it as your own **local Perplexity.ai**: smarter than a search engine, more reliable than a chatbot, and 100% in your control.  
+
 
 ![Untitled video - Made with Clipchamp (3)](https://github.com/user-attachments/assets/68b44701-85b0-4450-9deb-4b97a1113e66)
 

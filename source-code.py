@@ -61,32 +61,65 @@ class SemanticMemory:
         })
         self._log(f"Message added. Total memories: {len(self.memory)}")
 
-    def retrieve_relevant_messages(self, query: str, top_k: int = 5) -> List[Dict[str, str]]:
-        """Retrieves the most semantically relevant messages from memory."""
+    def retrieve_relevant_messages(self, query: str, top_k: int = 3, last_n: int = 2) -> List[Dict[str, str]]:
+        """
+        Retrieves a combination of the most recent messages (guaranteed for conversational context) 
+        and semantically relevant messages from the rest of the chat history.
+        """
         if not self.memory:
             self._log("Memory is empty. No messages to retrieve.")
             return []
 
-        self._log(f"Retrieving {top_k} relevant messages for query: '{query[:50]}...'")
-        query_embedding = self._get_embedding(query)
+        self._log(f"Retrieving contextual history: {top_k} semantic messages + last {last_n} guaranteed messages.")
 
-        scored_messages = []
-        for mem in self.memory:
-            similarity = self._cosine_similarity(query_embedding, mem['embedding'])
-            scored_messages.append({'message': mem, 'score': similarity})
+        # Step 1: Guarantee the last 'n' messages for immediate conversational context.
+        # This ensures follow-up questions like "why?" or "try again" make sense.
+        actual_last_n = min(last_n, len(self.memory))
+        guaranteed_messages = self.memory[-actual_last_n:]
+        if guaranteed_messages:
+            self._log(f"  -> Guaranteed retrieval of last {len(guaranteed_messages)} messages.")
 
-        scored_messages.sort(key=lambda x: x['score'], reverse=True)
+        # Step 2: Perform semantic search on the *rest* of the history for long-term context.
+        # The memory to search is everything *before* the messages we just guaranteed.
+        searchable_memory = self.memory[:-actual_last_n] if len(self.memory) > actual_last_n else []
+        
+        semantic_messages = []
+        if searchable_memory and top_k > 0:
+            self._log(f"Searching for {top_k} semantically relevant messages in remaining {len(searchable_memory)} memories...")
+            query_embedding = self._get_embedding(query)
 
-        relevant_messages = []
-        for item in scored_messages[:top_k]:
-            message_content = item['message']['content']
-            self._log(f"  -> Retrieved (Score: {item['score']:.4f}): '{message_content[:60]}...'")
-            relevant_messages.append({
-                'role': item['message']['role'],
-                'content': item['message']['content']
+            scored_messages = []
+            for mem in searchable_memory:
+                similarity = self._cosine_similarity(query_embedding, mem['embedding'])
+                scored_messages.append({'message': mem, 'score': similarity})
+
+            scored_messages.sort(key=lambda x: x['score'], reverse=True)
+
+            # Extract the top_k messages from the scored list
+            for item in scored_messages[:top_k]:
+                message_content = item['message']['content']
+                self._log(f"  -> Retrieved semantically (Score: {item['score']:.4f}): '{message_content[:60]}...'")
+                semantic_messages.append(item['message'])
+        elif top_k <= 0:
+             self._log("Semantic search skipped (top_k=0).")
+        else:
+            self._log("No older messages available for semantic search.")
+
+        # Step 3: Combine the two lists.
+        # Semantic messages are from the older part of the history. Guaranteed messages are the most recent.
+        # Concatenating them maintains a logical chronological grouping for the LLM.
+        combined_messages = semantic_messages + guaranteed_messages
+
+        # Step 4: Format the final list for output (just role and content), matching the original method's output format.
+        final_history = []
+        for msg in combined_messages:
+            final_history.append({
+                'role': msg['role'],
+                'content': msg['content']
             })
         
-        return relevant_messages
+        self._log(f"  -> Final contextual history contains {len(final_history)} messages.")
+        return final_history
 
     def clear(self):
         """Clears all messages from the semantic memory."""
@@ -96,12 +129,18 @@ class SemanticMemory:
 # --- NEW: SEARCH INTENT AGENT SYSTEM PROMPT ---
 SEARCH_INTENT_PROMPT = """You are a Search Query Decomposer. Your sole purpose is to analyze a user's query and break it down into a structured list of distinct, searchable topics.
 
+## CONVERSATIONAL CONTEXT:
+- You will be provided with the recent chat history before the user's latest query.
+- Use this history to understand the user's intent. For example, if the user says "that wasn't good enough," look at the previous AI response to understand what topic they are referring to and create a better, more specific search plan.
+- Your primary focus is always the *last user query*, but the history provides the necessary context to interpret it correctly.
+
 ## YOUR TASK:
-1.  Read the user's query.
-2.  Identify all the individual questions, concepts, or entities that would need to be searched to provide a comprehensive answer.
-3.  For each identified item, formulate a clear, concise search topic.
-4.  Output these topics in a structured `<search_plan>`.
-5.  Your output info should be well listed, concise, and never overly verbose , making it easy to read and directly to the point.
+1.  Read the chat history to understand the context.
+2.  Analyze the user's final query in light of that context.
+3.  Identify the individual questions or concepts that need to be searched to provide a comprehensive answer.
+4.  For each identified item, formulate a clear, concise search topic.
+5.  Output these topics in a structured `<search_plan>`.
+6.  Your output should be concise and directly to the point.
 
 ## OUTPUT FORMAT:
 You MUST respond with ONLY the `<search_plan>` format. Do not add any commentary or explanation.
@@ -126,12 +165,6 @@ Your Response:
 <search_plan>
 <topic>details of recent meeting between US president and Russian leader in Alaska</topic>
 <topic>key outcomes and agreements from US-Russia Alaska summit</topic>
-</search_plan>
-
-User Query: "nvidia stock price"
-Your Response:
-<search_plan>
-<topic>current stock price for NVIDIA (NVDA)</topic>
 </search_plan>
 """
 
@@ -237,14 +270,33 @@ class SearchWorker(QThread):
         self.validator_messages = [{'role': 'system', 'content': VALIDATOR_PROMPT}]
 
     def _get_search_plan(self, user_query: str) -> str:
-        """Calls the Search Intent Agent to decompose the user query."""
-        self.log_message.emit("\n" + "="*25 + "\n⚡ Calling Search Intent Agent to decompose query...\n" + "="*25)
+        """Calls the Search Intent Agent to decompose the user query, now WITH conversational context."""
+        self.log_message.emit("\n" + "="*25 + "\n⚡ Calling Search Intent Agent with conversational context...\n" + "="*25)
         self.progress.emit("Decomposing query for targeted search...")
         try:
-            messages = [
-                {'role': 'system', 'content': SEARCH_INTENT_PROMPT},
-                {'role': 'user', 'content': user_query}
-            ]
+            # --- MODIFICATION START ---
+            # Provide the Search Intent agent with the same contextual history as the main agent.
+            # This is critical for understanding follow-up queries like "try again" or "that's not right".
+            relevant_history = self.memory.retrieve_relevant_messages(user_query, top_k=3, last_n=2)
+            
+            sanitized_history = []
+            for msg in relevant_history:
+                if msg['role'] == 'assistant':
+                    # Clean up assistant messages to remove tool chatter from the history.
+                    clean_content = re.sub(r'<think>.*?</think>', '', msg['content'], flags=re.DOTALL)
+                    clean_content = re.sub(r'<search_request>.*?</search_request>', '', clean_content, flags=re.DOTALL).strip()
+                    sanitized_history.append({'role': 'assistant', 'content': clean_content})
+                else:
+                    sanitized_history.append(msg)
+            
+            self.log_message.emit(f"✅ Providing Search Intent Agent with {len(sanitized_history)} contextual messages.")
+            
+            system_message = {'role': 'system', 'content': SEARCH_INTENT_PROMPT}
+            current_user_message = {'role': 'user', 'content': user_query}
+            
+            messages = [system_message] + sanitized_history + [current_user_message]
+            # --- MODIFICATION END ---
+            
             response = ollama.chat(model='qwen3:8b', messages=messages, stream=False)
             plan = response['message']['content'].strip()
             self.log_message.emit(f"✅ Intent Agent Plan Received:\n{plan}\n")
@@ -266,7 +318,7 @@ class SearchWorker(QThread):
 
             system_message = self.main_messages[0]
             
-            relevant_history = self.memory.retrieve_relevant_messages(self.prompt, top_k=5)
+            relevant_history = self.memory.retrieve_relevant_messages(self.prompt, top_k=3, last_n=2)
             
             sanitized_history = []
             for msg in relevant_history:
@@ -696,7 +748,7 @@ class CustomTitleBar(QWidget):
     def __init__(self, parent):
         super().__init__(parent); self.parent = parent; self.pressing = False; self.setObjectName("customTitleBar")
         layout = QHBoxLayout(self); layout.setContentsMargins(10, 0, 0, 0); layout.setSpacing(10)
-        self.title = QLabel("AI Web Search Assistant"); self.title.setObjectName("windowTitle"); layout.addWidget(self.title); layout.addStretch()
+        self.title = QLabel("Web.ai"); self.title.setObjectName("windowTitle"); layout.addWidget(self.title); layout.addStretch()
         btn_size = 30
         self.minimize_button = QPushButton("—"); self.minimize_button.setObjectName("windowButton"); self.minimize_button.setFixedSize(btn_size, btn_size); self.minimize_button.clicked.connect(self.parent.showMinimized)
         self.maximize_button = QPushButton("□"); self.maximize_button.setObjectName("windowButton"); self.maximize_button.setFixedSize(btn_size, btn_size); self.maximize_button.clicked.connect(self.toggle_maximize)

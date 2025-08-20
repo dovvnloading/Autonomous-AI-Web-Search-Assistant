@@ -13,7 +13,7 @@ Unlike traditional chatbots, this assistant uses an internal chain of thought to
 
 ![Untitled video - Made with Clipchamp (3)](https://github.com/user-attachments/assets/68b44701-85b0-4450-9deb-4b97a1113e66)
 
-<img width="1226" height="816" alt="Screenshot 2025-08-15 142825" src="https://github.com/user-attachments/assets/bfdab3b5-ed80-4af1-b15d-ecd889886f05" />
+<img width="1100" height="750" alt="Screenshot 2025-08-20 190608" src="https://github.com/user-attachments/assets/fb98b86d-7b24-4217-9b84-fe3b0c5ed064" />
 
 ## Features
 

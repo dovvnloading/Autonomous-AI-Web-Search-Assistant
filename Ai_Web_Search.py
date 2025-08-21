@@ -641,7 +641,7 @@ Instructions: Based on these new search results, please give a comprehensive ans
 
     def validate_scraped_content(self, user_query: str, scraped_content: str) -> str:
         """NEW: Validator agent to check content relevance"""
-        self.log_message.emit("🔍 Running validator agent on scraped content...")
+        self.log_message.emit("Running validator agent on scraped content...")
         
         validation_prompt = f"""USER QUERY: {user_query}
 
@@ -662,14 +662,14 @@ Instructions: Based on these new search results, please give a comprehensive ans
                 return "pass"
                 
         except Exception as e:
-            self.log_message.emit(f"❌ Validator agent failed: {e}")
+            self.log_message.emit(f"Validator agent failed: {e}")
             return "pass"
 
     def retry_search_with_refinement(self, original_search: Tuple[str, str]) -> str:
         """NEW: Retry search with refined query based on validation failure"""
         original_query, original_domain = original_search
         
-        self.log_message.emit("🔄 Attempting refined search...")
+        self.log_message.emit("Attempting refined search...")
         
         refined_queries = []
         
@@ -685,7 +685,7 @@ Instructions: Based on these new search results, please give a comprehensive ans
         refined_queries.append((f"{original_query} news update", None))
         
         for refined_query, refined_domain in refined_queries[:6]:
-            self.log_message.emit(f"🎯 Trying refined search: '{refined_query}'" + (f" on {refined_domain}" if refined_domain else ""))
+            self.log_message.emit(f"Trying refined search: '{refined_query}'" + (f" on {refined_domain}" if refined_domain else ""))
             
             content, success_count, quality = self.perform_single_search_and_scrape(refined_query, refined_domain)
             
@@ -705,7 +705,7 @@ Instructions: Based on these new search results, please give a comprehensive ans
         model_name = 'qwen3:14b'
         
         # --- MODIFIED: Refined and structured logging of the model payload ---
-        log_parts = ["\n" + "--- 🤖 PAYLOAD BEING SENT TO MODEL 🤖 ---"]
+        log_parts = ["\n" + "--- PAYLOAD BEING SENT TO MODEL ---"]
         
         # Extract and format different parts of the payload
         system_prompt = messages[0]['content']
@@ -736,7 +736,7 @@ Instructions: Based on these new search results, please give a comprehensive ans
         self.log_message.emit("\n".join(log_parts))
         # --- END OF MODIFICATION ---
 
-        self.log_message.emit(f"🤖 Requesting response from {model_name} with {len(messages)} messages in context...")
+        self.log_message.emit(f"Requesting response from {model_name} with {len(messages)} messages in context...")
         try:
             response = ollama.chat(model=model_name, messages=messages, stream=False)
             self.log_message.emit(f"✅ {model_name} response received successfully.")
@@ -984,10 +984,7 @@ class MainWindow(QMainWindow):
         self.clear_button.setObjectName("clearButton")
         self.clear_button.clicked.connect(self.clear_chat_session)
         
-        # --- MODIFICATION: Progress bar creation has been removed ---
-
         status_layout.addWidget(self.status_label)
-        # --- MODIFICATION: Progress bar is no longer added to the layout ---
         status_layout.addStretch()
         status_layout.addWidget(self.clear_button)
         
@@ -1049,7 +1046,7 @@ class MainWindow(QMainWindow):
             
             #forceSearchButton {
                 background-color: #3C3C3C;
-                color: #888; /* Dim color when off */
+                color: #888;
                 border: 1px solid #555;
                 border-radius: 25px;
                 font-size: 20px;
@@ -1058,8 +1055,8 @@ class MainWindow(QMainWindow):
                 background-color: #4A4A4A;
             }
             #forceSearchButton:checked {
-                background-color: #2a5c3d; /* Highlight color when on */
-                color: #90ee90; /* Bright icon color when on */
+                background-color: #2a5c3d;
+                color: #90ee90;
                 border: 1px solid #4EC9B0;
             }
             #forceSearchButton:disabled {
@@ -1070,7 +1067,6 @@ class MainWindow(QMainWindow):
             #statusLabel { color: #888888; font-size: 12px; }
             #clearButton { background-color: #3C3C3C; color: #CCCCCC; border: 1px solid #555; padding: 4px 10px; border-radius: 4px; font-size: 12px; }
             #clearButton:hover { background-color: #4A4A4A; color: white; border-color: #666; }
-            /* --- MODIFICATION: Progress bar styles have been removed --- */
             QScrollBar:vertical { background: transparent; width: 10px; margin: 0; }
             QScrollBar::handle:vertical { background: #4A4A4A; border-radius: 5px; min-height: 25px; } 
             QScrollBar::handle:vertical:hover { background-color: #6A6A6A; }
@@ -1095,7 +1091,8 @@ class MainWindow(QMainWindow):
         if not text:
             return
             
-        self.add_message(text, is_user=True)
+        self.add_message_to_ui(text, is_user=True)
+        
         self.input_field.clear()
         self.set_ui_enabled(False)
         
@@ -1106,14 +1103,14 @@ class MainWindow(QMainWindow):
             self.log_display.append(f"{datetime.now().strftime('%H:%M:%S')} - MODE: Force Search Enabled")
 
         self.worker = SearchWorker(text, self.memory, force_search=is_force_search_enabled)
-        self.worker.finished.connect(self.handle_response)
-        self.worker.error.connect(self.handle_error)
+        self.worker.finished.connect(lambda response: self.handle_response(response, original_prompt=text))
+        self.worker.error.connect(lambda error: self.handle_error(error, original_prompt=text))
         self.worker.progress.connect(self.update_status)
         self.worker.log_message.connect(self.update_log)
         self.worker.start()
 
-    def add_message(self, text: str, is_user: bool):
-        """Adds message to UI and also to the semantic memory."""
+    def add_message_to_ui(self, text: str, is_user: bool):
+        """Adds a message bubble to the chat display, but does NOT save to memory."""
         main_text, citations, thinking_text = text, None, None
         
         if not is_user:
@@ -1161,20 +1158,28 @@ class MainWindow(QMainWindow):
         
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, row_container)
         
-        self.memory.add_message(role='user' if is_user else 'assistant', content=text)
-        
         from PySide6.QtCore import QTimer
         QTimer.singleShot(50, lambda: self.chat_scroll.verticalScrollBar().setValue(
             self.chat_scroll.verticalScrollBar().maximum()))
 
-    def handle_response(self, response: str):
-        self.add_message(response, is_user=False)
+    def handle_response(self, response: str, original_prompt: str):
+        """Handles a successful response from the worker."""
+        self.add_message_to_ui(response, is_user=False)
+        
+        self.memory.add_message(role='user', content=original_prompt)
+        self.memory.add_message(role='assistant', content=response)
+        
         self.set_ui_enabled(True)
         self.log_display.append(f"{datetime.now().strftime('%H:%M:%S')} - RESPONSE DELIVERED")
 
-    def handle_error(self, error: str):
+    def handle_error(self, error: str, original_prompt: str):
+        """Handles an error from the worker."""
         error_msg = f"❌ Error: {error}"
-        self.add_message(error_msg, is_user=False)
+        self.add_message_to_ui(error_msg, is_user=False)
+        
+        self.memory.add_message(role='user', content=original_prompt)
+        self.memory.add_message(role='assistant', content=error_msg)
+        
         self.set_ui_enabled(True)
         self.log_display.append(f"{datetime.now().strftime('%H:%M:%S')} - ERROR: {error}")
 
@@ -1195,11 +1200,9 @@ class MainWindow(QMainWindow):
         self.force_search_toggle.setEnabled(enabled)
         
         if enabled:
-            # --- MODIFICATION: Progress bar control removed ---
             self.status_label.setText("Ready")
             self.input_field.setFocus()
         else:
-            # --- MODIFICATION: Progress bar control removed ---
             pass
 
     def keyPressEvent(self, event):

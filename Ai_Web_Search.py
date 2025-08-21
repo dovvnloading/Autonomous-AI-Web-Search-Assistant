@@ -28,7 +28,8 @@ class SemanticMemory:
 
     def _log(self, message):
         if self.log_callback:
-            self.log_callback(f"🧠 SemanticMemory: {message}")
+            # MODIFICATION: Removed emoji for cleaner logs
+            self.log_callback(f"[SemanticMemory] {message}")
 
     def _get_embedding(self, text: str) -> np.ndarray:
         """Generates an embedding for a given text."""
@@ -73,14 +74,12 @@ class SemanticMemory:
         self._log(f"Retrieving contextual history: {top_k} semantic messages + last {last_n} guaranteed messages.")
 
         # Step 1: Guarantee the last 'n' messages for immediate conversational context.
-        # This ensures follow-up questions like "why?" or "try again" make sense.
         actual_last_n = min(last_n, len(self.memory))
         guaranteed_messages = self.memory[-actual_last_n:]
         if guaranteed_messages:
             self._log(f"  -> Guaranteed retrieval of last {len(guaranteed_messages)} messages.")
 
         # Step 2: Perform semantic search on the *rest* of the history for long-term context.
-        # The memory to search is everything *before* the messages we just guaranteed.
         searchable_memory = self.memory[:-actual_last_n] if len(self.memory) > actual_last_n else []
         
         semantic_messages = []
@@ -95,7 +94,6 @@ class SemanticMemory:
 
             scored_messages.sort(key=lambda x: x['score'], reverse=True)
 
-            # Extract the top_k messages from the scored list
             for item in scored_messages[:top_k]:
                 message_content = item['message']['content']
                 self._log(f"  -> Retrieved semantically (Score: {item['score']:.4f}): '{message_content[:60]}...'")
@@ -106,11 +104,9 @@ class SemanticMemory:
             self._log("No older messages available for semantic search.")
 
         # Step 3: Combine the two lists.
-        # Semantic messages are from the older part of the history. Guaranteed messages are the most recent.
-        # Concatenating them maintains a logical chronological grouping for the LLM.
         combined_messages = semantic_messages + guaranteed_messages
 
-        # Step 4: Format the final list for output (just role and content), matching the original method's output format.
+        # Step 4: Format the final list for output
         final_history = []
         for msg in combined_messages:
             final_history.append({
@@ -126,7 +122,7 @@ class SemanticMemory:
         self.memory = []
         self._log("Memory has been cleared.")
 
-# --- NEW: SEARCH INTENT AGENT SYSTEM PROMPT ---
+# --- SEARCH INTENT AGENT SYSTEM PROMPT ---
 SEARCH_INTENT_PROMPT = """You are a Search Query Decomposer. Your sole purpose is to analyze a user's query and break it down into a structured list of distinct, searchable topics.
 
 ## CONVERSATIONAL CONTEXT:
@@ -230,6 +226,14 @@ Search for queries that benefit from current, recent, or specific information in
 The <domain> tag is OPTIONAL. Only use it when you have high confidence in a specific authoritative source.
 <search_request><query>specific targeted query</query><domain>[optional-domain.com]</domain></search_request>
 
+## NEW: ABILITY TO CONDUCT AN ADDITIONAL SEARCH
+- After you receive the initial search results, you must evaluate them.
+- If you determine the information is INSUFFICIENT to provide a high-quality answer (e.g., the user wants local gems, but results are only large chains), you can request ONE additional search to get more specific information.
+- To do this, your response must consist **ONLY** of the `<additional_search>` tag. Do not add any other text, thoughts, or formatting.
+- The system will see this request, perform the new search, and then provide you with the combined results from BOTH searches to generate a final, complete answer.
+
+ADDITIONAL SEARCH FORMAT (Your entire response must be only this):
+<additional_search><query>your new, refined, and specific search query</query></additional_search>
 
 ## VITAL!!! - SOURCE FORMAT REQUIRED:
 <sources>
@@ -272,38 +276,37 @@ class SearchWorker(QThread):
 
     def _get_search_plan(self, user_query: str) -> str:
         """Calls the Search Intent Agent to decompose the user query, now WITH conversational context."""
-        self.log_message.emit("\n" + "="*25 + "\n⚡ Calling Search Intent Agent with conversational context...\n" + "="*25)
+        # MODIFICATION: Removed emoji for cleaner logs
+        self.log_message.emit("\n" + "="*25 + "\n[IntentAgent] Calling with conversational context...\n" + "="*25)
         self.progress.emit("Decomposing query for targeted search...")
         try:
-            # --- MODIFICATION START ---
-            # Provide the Search Intent agent with the same contextual history as the main agent.
-            # This is critical for understanding follow-up queries like "try again" or "that's not right".
             relevant_history = self.memory.retrieve_relevant_messages(user_query, top_k=3, last_n=2)
             
             sanitized_history = []
             for msg in relevant_history:
                 if msg['role'] == 'assistant':
-                    # Clean up assistant messages to remove tool chatter from the history.
                     clean_content = re.sub(r'<think>.*?</think>', '', msg['content'], flags=re.DOTALL)
                     clean_content = re.sub(r'<search_request>.*?</search_request>', '', clean_content, flags=re.DOTALL).strip()
                     sanitized_history.append({'role': 'assistant', 'content': clean_content})
                 else:
                     sanitized_history.append(msg)
             
-            self.log_message.emit(f"✅ Providing Search Intent Agent with {len(sanitized_history)} contextual messages.")
+            # MODIFICATION: Removed emoji for cleaner logs
+            self.log_message.emit(f"[IntentAgent] Providing {len(sanitized_history)} contextual messages.")
             
             system_message = {'role': 'system', 'content': SEARCH_INTENT_PROMPT}
             current_user_message = {'role': 'user', 'content': user_query}
             
             messages = [system_message] + sanitized_history + [current_user_message]
-            # --- MODIFICATION END ---
             
             response = ollama.chat(model='qwen3:4b', messages=messages, stream=False)
             plan = response['message']['content'].strip()
-            self.log_message.emit(f"✅ Intent Agent Plan Received:\n{plan}\n")
+            # MODIFICATION: Removed emoji for cleaner logs
+            self.log_message.emit(f"[IntentAgent] Plan received:\n{plan}\n")
             return plan
         except Exception as e:
-            self.log_message.emit(f"⚠️ Search Intent Agent failed: {e}. Proceeding without a plan.\n")
+            # MODIFICATION: Removed emoji for cleaner logs
+            self.log_message.emit(f"[IntentAgent] Failed: {e}. Proceeding without plan.\n")
             return ""
 
     def run(self):
@@ -344,11 +347,13 @@ class SearchWorker(QThread):
                 search_requests = search_requests[:1]
 
             if search_requests:
-                self.log_message.emit(f"🔍 Performing targeted search based on model analysis.")
+                # MODIFICATION: Removed emoji for cleaner logs
+                self.log_message.emit(f"[Search] Performing targeted search based on model analysis.")
                 scraped_content = self.execute_search_plan(search_requests)
 
                 if not scraped_content.strip():
-                    self.log_message.emit("❌ Search resulted in no usable content. Responding with available knowledge.")
+                    # MODIFICATION: Removed emoji for cleaner logs
+                    self.log_message.emit("[Search] No usable content. Responding with available knowledge.")
                     prompt_for_no_search = "The web search failed to return any content. Please answer the user's last question using only your existing knowledge, without mentioning the failed search."
                     messages_for_fallback = messages_for_planning + [
                         {'role': 'assistant', 'content': initial_model_response},
@@ -360,7 +365,8 @@ class SearchWorker(QThread):
                     validation_result = self.validate_scraped_content(self.prompt, scraped_content)
                     
                     if validation_result == "pass":
-                        self.log_message.emit("✅ Validator: Content passed relevance check")
+                        # MODIFICATION: Removed emoji for cleaner logs
+                        self.log_message.emit("[Validator] Content passed relevance check.")
                         self.progress.emit("Synthesizing validated response...")
                         synthesis_prompt = f"""<think>
 The initial search was successful and the validator confirmed the content is relevant. Now I will synthesize this information into a clear, concise answer for the user, making sure to include citations from the provided content.
@@ -375,9 +381,67 @@ Instructions: Based on the provided search results, please give a comprehensive 
                             {'role': 'assistant', 'content': initial_model_response},
                             {'role': 'user', 'content': synthesis_prompt}
                         ]
-                        final_response = self.get_ollama_response(messages=messages_for_synthesis)
+                        synthesis_response_1 = self.get_ollama_response(messages=messages_for_synthesis)
+
+                        # --- NEW: ADDITIONAL SEARCH LOGIC ---
+                        additional_query = self.extract_additional_search(synthesis_response_1)
+                        if additional_query:
+                            self.log_message.emit(f"[Model] Requested additional search for: '{additional_query}'")
+                            self.progress.emit("Performing additional search requested by model...")
+                            
+                            additional_scraped_content = self.execute_search_plan([(additional_query, None)])
+
+                            if additional_scraped_content and additional_scraped_content.strip():
+                                self.progress.emit("Validating additional search results...")
+                                additional_validation = self.validate_scraped_content(self.prompt, additional_scraped_content)
+
+                                if additional_validation == "pass":
+                                    self.log_message.emit("[Validator] Additional search content passed.")
+                                    self.progress.emit("Synthesizing final response with all data...")
+                                    
+                                    final_synthesis_prompt = f"""<think>
+My first search provided some information, but I determined it was insufficient and requested an additional search for '{additional_query}'. That search was successful. Now I have the results from both searches and will combine them into a single, comprehensive final answer.
+</think>
+
+INITIAL SEARCH RESULTS:
+{scraped_content}
+
+ADDITIONAL SEARCH RESULTS:
+{additional_scraped_content}
+
+Instructions: Based on the combined information from BOTH sets of search results, please give a final, comprehensive answer to the user's last question. It is critical to synthesize information from both contexts and include all relevant source citations.
+"""
+                                    messages_for_final_synthesis = messages_for_synthesis + [
+                                        {'role': 'assistant', 'content': synthesis_response_1}, # This is the <additional_search> tag
+                                        {'role': 'user', 'content': final_synthesis_prompt}
+                                    ]
+                                    final_response = self.get_ollama_response(messages=messages_for_final_synthesis)
+                                else:
+                                    self.log_message.emit("[Validator] Additional search content FAILED validation. Using initial results only.")
+                                    fallback_prompt = f"""<think>
+I attempted an additional search for '{additional_query}', but the results were not relevant. I must now answer using only the initial search results. I will answer the user's question as best I can with the information I have.
+</think>
+INITIAL SEARCH RESULTS:{scraped_content}
+Instructions: Your additional search failed validation. Answer the user's question using ONLY the initial search results provided above."""
+                                    messages_for_fallback = messages_for_synthesis + [{'role': 'assistant', 'content': synthesis_response_1}, {'role': 'user', 'content': fallback_prompt}]
+                                    final_response = self.get_ollama_response(messages=messages_for_fallback)
+                            else:
+                                self.log_message.emit("[Search] Additional search returned no content. Using initial results only.")
+                                fallback_prompt = f"""<think>
+I attempted an additional search for '{additional_query}', but it returned no usable content. I must now answer using only the initial search results. I will answer the user's question as best I can with the information I have.
+</think>
+INITIAL SEARCH RESULTS:{scraped_content}
+Instructions: Your additional search failed to find anything. Answer the user's question using ONLY the initial search results provided above."""
+                                messages_for_fallback = messages_for_synthesis + [{'role': 'assistant', 'content': synthesis_response_1}, {'role': 'user', 'content': fallback_prompt}]
+                                final_response = self.get_ollama_response(messages=messages_for_fallback)
+
+                        else:
+                            # No additional search was requested.
+                            final_response = synthesis_response_1
+                        # --- END: ADDITIONAL SEARCH LOGIC ---
                     else:
-                        self.log_message.emit(f"❌ Validator: Content failed - {validation_result}")
+                        # MODIFICATION: Removed emoji for cleaner logs
+                        self.log_message.emit(f"[Validator] Content failed: {validation_result}")
                         self.progress.emit("Content failed validation, attempting refined search...")
                         
                         refined_content = self.retry_search_with_refinement(search_requests[0])
@@ -396,7 +460,8 @@ Instructions: Based on these new search results, please give a comprehensive ans
                             ]
                             final_response = self.get_ollama_response(messages=messages_for_refined_synthesis)
                         else:
-                            self.log_message.emit("⚠️ Both primary and refined searches failed validation")
+                            # MODIFICATION: Removed emoji for cleaner logs
+                            self.log_message.emit("[Search] Primary and refined searches failed validation.")
                             prompt_for_failed_search = "Both the primary and refined web searches failed to return useful content. Please inform the user that you couldn't find relevant information online and answer their last question using only your existing knowledge."
                             messages_for_final_fallback = messages_for_planning + [
                                 {'role': 'assistant', 'content': initial_model_response},
@@ -460,7 +525,8 @@ Instructions: Based on these new search results, please give a comprehensive ans
                 return "", 0, "poor"
 
             urls_to_scrape = ranked_urls[:self.MAX_SOURCES_TO_SCRAPE]
-            self.log_message.emit(f"📊 Selected {len(urls_to_scrape)} top sources from {len(ranked_urls)} candidates")
+            # MODIFICATION: Removed emoji for cleaner logs
+            self.log_message.emit(f"[Search] Selected {len(urls_to_scrape)} top sources from {len(ranked_urls)} candidates.")
 
             scraped_results = []
             success_count = 0
@@ -474,9 +540,11 @@ Instructions: Based on these new search results, please give a comprehensive ans
                     scraped_results.append(scraped_data)
                     success_count += 1
                     total_content_length += content_length
-                    self.log_message.emit(f"✅ Extracted: {url} ({content_length} chars, rank score: {score:.1f})")
+                    # MODIFICATION: Removed emoji for cleaner logs
+                    self.log_message.emit(f"[Scraper] Extracted: {url} ({content_length} chars, rank score: {score:.1f})")
                 else:
-                    self.log_message.emit(f"❌ Poor extraction: {url} (content too short or failed)")
+                    # MODIFICATION: Removed emoji for cleaner logs
+                    self.log_message.emit(f"[Scraper] Poor extraction: {url} (content too short or failed).")
             
             if success_count >= 2 and total_content_length > 1000:
                 quality = "excellent"
@@ -486,8 +554,9 @@ Instructions: Based on these new search results, please give a comprehensive ans
                 quality = "fair"
             else:
                 quality = "poor"
-                
-            self.log_message.emit(f"📈 Search quality: {quality} ({total_content_length} chars from {success_count}/{len(urls_to_scrape)} sources)")
+            
+            # MODIFICATION: Removed emoji for cleaner logs
+            self.log_message.emit(f"[Search] Quality: {quality} ({total_content_length} chars from {success_count}/{len(urls_to_scrape)} sources).")
             return "\n".join(scraped_results), success_count, quality
             
         except Exception as e:
@@ -639,8 +708,19 @@ Instructions: Based on these new search results, please give a comprehensive ans
                 
         return valid_requests
 
+    def extract_additional_search(self, text: str) -> str:
+        """NEW: Extracts the query from an <additional_search> tag."""
+        pattern = r'<additional_search>\s*<query>(.*?)</query>\s*</additional_search>'
+        match = re.search(pattern, text.strip(), re.DOTALL | re.IGNORECASE)
+        if match:
+            query = match.group(1).strip()
+            # Ensure the response is ONLY the tag, with maybe some whitespace
+            if text.strip() == match.group(0).strip() and len(query) > 3:
+                return query
+        return ""
+
     def validate_scraped_content(self, user_query: str, scraped_content: str) -> str:
-        """NEW: Validator agent to check content relevance"""
+        """Validator agent to check content relevance"""
         self.log_message.emit("Running validator agent on scraped content...")
         
         validation_prompt = f"""USER QUERY: {user_query}
@@ -666,7 +746,7 @@ Instructions: Based on these new search results, please give a comprehensive ans
             return "pass"
 
     def retry_search_with_refinement(self, original_search: Tuple[str, str]) -> str:
-        """NEW: Retry search with refined query based on validation failure"""
+        """Retry search with refined query based on validation failure"""
         original_query, original_domain = original_search
         
         self.log_message.emit("Attempting refined search...")
@@ -692,31 +772,29 @@ Instructions: Based on these new search results, please give a comprehensive ans
             if success_count > 0:
                 validation_result = self.validate_scraped_content(self.prompt, content)
                 if validation_result == "pass":
-                    self.log_message.emit("✅ Refined search passed validation!")
+                    # MODIFICATION: Removed emoji for cleaner logs
+                    self.log_message.emit("[Validator] Refined search passed validation.")
                     return content
                 else:
-                    self.log_message.emit(f"❌ Refined search also failed validation: {validation_result}")
+                    # MODIFICATION: Removed emoji for cleaner logs
+                    self.log_message.emit(f"[Validator] Refined search also failed: {validation_result}")
             
-        self.log_message.emit("❌ All refined search attempts failed")
+        # MODIFICATION: Removed emoji for cleaner logs
+        self.log_message.emit("[Search] All refined search attempts failed.")
         return ""
 
     def get_ollama_response(self, messages: list) -> str:
         """Get response from the main Ollama model using a list of messages."""
         model_name = 'qwen3:14b'
         
-        # --- MODIFIED: Refined and structured logging of the model payload ---
         log_parts = ["\n" + "--- PAYLOAD BEING SENT TO MODEL ---"]
-        
-        # Extract and format different parts of the payload
         system_prompt = messages[0]['content']
         history_messages = messages[1:-1]
         final_task = messages[-1]['content']
 
-        # System Prompt (Truncated)
         log_parts.append("\n[SYSTEM PROMPT]:")
         log_parts.append(f'"{system_prompt[:150].strip().replace(chr(10), " ")}..."')
 
-        # Semantic History
         log_parts.append("\n[SEMANTIC HISTORY RETRIEVED]:")
         if history_messages:
             for msg in history_messages:
@@ -728,21 +806,21 @@ Instructions: Based on these new search results, please give a comprehensive ans
         else:
             log_parts.append("  (None)")
 
-        # Final User Task
         log_parts.append("\n[CURRENT USER TASK]:")
         log_parts.append(f'"{final_task.strip().replace(chr(10), " ")}"')
         
         log_parts.append("\n" + "--- END OF PAYLOAD ---" + "\n")
         self.log_message.emit("\n".join(log_parts))
-        # --- END OF MODIFICATION ---
 
         self.log_message.emit(f"Requesting response from {model_name} with {len(messages)} messages in context...")
         try:
             response = ollama.chat(model=model_name, messages=messages, stream=False)
-            self.log_message.emit(f"✅ {model_name} response received successfully.")
+            # MODIFICATION: Removed emoji for cleaner logs
+            self.log_message.emit(f"[Ollama] {model_name} response received.")
             return response['message']['content']
         except Exception as e:
-            self.log_message.emit(f"❌ {model_name} request failed: {e}")
+            # MODIFICATION: Removed emoji for cleaner logs
+            self.log_message.emit(f"[Ollama] {model_name} request failed: {e}")
             raise
 
 class CustomTitleBar(QWidget):
@@ -1174,7 +1252,8 @@ class MainWindow(QMainWindow):
 
     def handle_error(self, error: str, original_prompt: str):
         """Handles an error from the worker."""
-        error_msg = f"❌ Error: {error}"
+        # MODIFICATION: Removed emoji for cleaner UI/logs
+        error_msg = f"Error: {error}"
         self.add_message_to_ui(error_msg, is_user=False)
         
         self.memory.add_message(role='user', content=original_prompt)

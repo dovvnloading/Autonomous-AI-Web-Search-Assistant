@@ -991,9 +991,9 @@ class MainWindow(QMainWindow):
         self.progress_bar.hide()
         
         status_layout.addWidget(self.status_label)
+        status_layout.addWidget(self.progress_bar)
         status_layout.addStretch()
         status_layout.addWidget(self.clear_button)
-        status_layout.addWidget(self.progress_bar)
         
         footer_layout.addLayout(input_layout)
         footer_layout.addLayout(status_layout)

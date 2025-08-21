@@ -230,10 +230,11 @@ Search for queries that benefit from current, recent, or specific information in
 The <domain> tag is OPTIONAL. Only use it when you have high confidence in a specific authoritative source.
 <search_request><query>specific targeted query</query><domain>[optional-domain.com]</domain></search_request>
 
-## SOURCE FORMAT REQUIRED:
+
+## VITAL!!! - SOURCE FORMAT REQUIRED:
 <sources>
 <source url="actual-scraped-url" date="extracted-date">Clean Title from Results</source>
-</sources> (this is vital, you MUST ALWAYS INCLUDE THIS AT THE END)
+</sources> (I MUST ALWAYS INCLUDE THIS AT THE END OF EACH MESSAGE THE CONTAINS WEB DATA)
 
 ## RESPONSE FORMATTING:
 - You MUST use Markdown for all formatting (e.g., **bold**, *italics*, bullet points with `*` or `-`).
@@ -297,7 +298,7 @@ class SearchWorker(QThread):
             messages = [system_message] + sanitized_history + [current_user_message]
             # --- MODIFICATION END ---
             
-            response = ollama.chat(model='qwen3:8b', messages=messages, stream=False)
+            response = ollama.chat(model='qwen3:4b', messages=messages, stream=False)
             plan = response['message']['content'].strip()
             self.log_message.emit(f"✅ Intent Agent Plan Received:\n{plan}\n")
             return plan
@@ -603,8 +604,8 @@ Instructions: Based on these new search results, please give a comprehensive ans
         if content_length < 300:
             return f"<result url='{url}' title='{title}' date='{date}' error='Content below quality threshold'></result>", False, 0
         
-        if content_length > 4000:
-            content_to_use = content_to_use[:4000] + "..."
+        if content_length > 8000:
+            content_to_use = content_to_use[:8000] + "..."
         
         formatted_string = f"""<result url="{url}" date="{date}">
         <title>{title}</title>
@@ -649,7 +650,7 @@ Instructions: Based on these new search results, please give a comprehensive ans
         """
         try:
             validator_messages = self.validator_messages + [{'role': 'user', 'content': validation_prompt}]
-            response = ollama.chat(model='qwen3:8b', messages=validator_messages, stream=False)
+            response = ollama.chat(model='qwen3:4b', messages=validator_messages, stream=False)
             validator_output = response['message']['content'].strip()
             
             if '<pass>' in validator_output.lower():
@@ -965,10 +966,9 @@ class MainWindow(QMainWindow):
         self.send_button.setFixedSize(50, 50)
         self.send_button.clicked.connect(self.send_message)
         
-        # --- MODIFIED: Force Search button is now a checkable toggle ---
         self.force_search_toggle = QPushButton("⌕")
         self.force_search_toggle.setObjectName("forceSearchButton")
-        self.force_search_toggle.setCheckable(True) # Make it a toggle
+        self.force_search_toggle.setCheckable(True)
         self.force_search_toggle.setFixedSize(50, 50)
         self.force_search_toggle.setToolTip("Enable/Disable Search Mode")
         
@@ -984,14 +984,10 @@ class MainWindow(QMainWindow):
         self.clear_button.setObjectName("clearButton")
         self.clear_button.clicked.connect(self.clear_chat_session)
         
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setObjectName("progressBar")
-        self.progress_bar.setRange(0, 0)
-        self.progress_bar.setTextVisible(False)
-        self.progress_bar.hide()
-        
+        # --- MODIFICATION: Progress bar creation has been removed ---
+
         status_layout.addWidget(self.status_label)
-        status_layout.addWidget(self.progress_bar)
+        # --- MODIFICATION: Progress bar is no longer added to the layout ---
         status_layout.addStretch()
         status_layout.addWidget(self.clear_button)
         
@@ -1051,7 +1047,6 @@ class MainWindow(QMainWindow):
             #sendButton:hover { background-color: #1F9CFD; } 
             #sendButton:disabled { background-color: #4A4A4A; }
             
-            /* --- MODIFIED: Styles for the Force Search Toggle Button --- */
             #forceSearchButton {
                 background-color: #3C3C3C;
                 color: #888; /* Dim color when off */
@@ -1071,13 +1066,11 @@ class MainWindow(QMainWindow):
                 background-color: #252526;
                 color: #666;
             }
-            /* --- END OF MODIFICATION --- */
             
             #statusLabel { color: #888888; font-size: 12px; }
-            #clearButton { background-color: #3C3C3C; color: #CCCCCC; border: 1px solid #555; padding: 4px 10px; border-radius: 4px; font-size: 12px; margin-right: 10px; }
+            #clearButton { background-color: #3C3C3C; color: #CCCCCC; border: 1px solid #555; padding: 4px 10px; border-radius: 4px; font-size: 12px; }
             #clearButton:hover { background-color: #4A4A4A; color: white; border-color: #666; }
-            #progressBar { border: none; background: #3C3C3C; border-radius: 2px; height: 3px; max-width: 180px; }
-            #progressBar::chunk { background-color: #4EC9B0; }
+            /* --- MODIFICATION: Progress bar styles have been removed --- */
             QScrollBar:vertical { background: transparent; width: 10px; margin: 0; }
             QScrollBar::handle:vertical { background: #4A4A4A; border-radius: 5px; min-height: 25px; } 
             QScrollBar::handle:vertical:hover { background-color: #6A6A6A; }
@@ -1106,14 +1099,12 @@ class MainWindow(QMainWindow):
         self.input_field.clear()
         self.set_ui_enabled(False)
         
-        # Check the state of the toggle button to decide the search mode
         is_force_search_enabled = self.force_search_toggle.isChecked()
         
         self.log_display.append(f"{datetime.now().strftime('%H:%M:%S')} - USER QUERY: {text}")
         if is_force_search_enabled:
             self.log_display.append(f"{datetime.now().strftime('%H:%M:%S')} - MODE: Force Search Enabled")
 
-        
         self.worker = SearchWorker(text, self.memory, force_search=is_force_search_enabled)
         self.worker.finished.connect(self.handle_response)
         self.worker.error.connect(self.handle_error)
@@ -1204,11 +1195,12 @@ class MainWindow(QMainWindow):
         self.force_search_toggle.setEnabled(enabled)
         
         if enabled:
-            self.progress_bar.hide()
+            # --- MODIFICATION: Progress bar control removed ---
             self.status_label.setText("Ready")
             self.input_field.setFocus()
         else:
-            self.progress_bar.show()
+            # --- MODIFICATION: Progress bar control removed ---
+            pass
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Return and not (event.modifiers() & Qt.ShiftModifier):

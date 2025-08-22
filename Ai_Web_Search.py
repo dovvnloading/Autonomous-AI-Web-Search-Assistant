@@ -199,6 +199,48 @@ For irrelevant content:
 <fail>Content is [specific reason - off-topic/outdated/generic/insufficient]</fail>
 """
 
+# --- NEW: REFINEMENT AGENT SYSTEM PROMPT ---
+REFINER_PROMPT = """You are an expert Search Query Refinement Agent. Your purpose is to improve a failed search attempt by generating a better search plan.
+
+## YOUR INPUTS:
+1.  **ORIGINAL USER QUERY:** The user's ultimate goal.
+2.  **FAILED SEARCH QUERY:** The specific search query that returned irrelevant content.
+3.  **FAILURE REASON:** The analysis from a validation agent explaining *why* the content was bad.
+
+## YOUR TASK:
+1.  Analyze the three inputs to understand the mismatch between intent and result.
+2.  Brainstorm solutions. For example:
+    - If content was "too generic," add keywords for specifics like "technical specifications," "in-depth analysis," or "step-by-step guide."
+    - If content was "outdated," add the current year or terms like "latest news."
+    - If content was "off-topic," consider adding negative keywords (e.g., `-reviews`) or focusing on a different aspect of the original query.
+    - If the query was too complex, break it down into simpler, more focused questions.
+3.  Generate a new, diverse set of search topics that are more likely to succeed.
+4.  Output these new topics in a structured `<refined_plan>`.
+
+## OUTPUT FORMAT:
+You MUST respond with ONLY the `<refined_plan>` format. Do not add any commentary.
+
+<refined_plan>
+<topic>[First new, improved search topic]</topic>
+<topic>[Second new, improved search topic]</topic>
+<topic>[Third new, improved search topic]</topic>
+</refined_plan>
+
+## EXAMPLE:
+
+**ORIGINAL USER QUERY:** "Tell me about the Tesla Model 3."
+**FAILED SEARCH QUERY:** "Tesla Model 3"
+**FAILURE REASON:** "Content is too generic, mostly just sales and marketing pages."
+
+**YOUR RESPONSE:**
+<refined_plan>
+<topic>Tesla Model 3 Long Range performance specs 2024</topic>
+<topic>in-depth review of Tesla Model 3 Highland interior</topic>
+<topic>common problems with Tesla Model 3 after 50000 miles</topic>
+</refined_plan>
+"""
+
+
 # --- MAIN SEARCH AGENT SYSTEM PROMPT ---
 MAIN_SEARCH_PROMPT = """You are a web search AI assistant. You have access to real-time web search and should use it intelligently. You will be given a user's query and a semantically relevant chat history.
 
@@ -269,6 +311,9 @@ class SearchWorker(QThread):
         )
         self.main_messages = [{'role': 'system', 'content': formatted_main_prompt}]
         self.validator_messages = [{'role': 'system', 'content': VALIDATOR_PROMPT}]
+        # NEW: Add refiner prompt to instance
+        self.refiner_messages = [{'role': 'system', 'content': REFINER_PROMPT}]
+
 
     def _get_search_plan(self, user_query: str) -> str:
         """Calls the Search Intent Agent to decompose the user query, now WITH conversational context."""
@@ -301,50 +346,104 @@ class SearchWorker(QThread):
             self.log_message.emit(f"[IntentAgent] Failed: {e}. Proceeding without plan.\n")
             return ""
 
+    # NEW: Method to call the refinement agent
+    def _get_refined_search_plan(self, failed_query: str, failure_reason: str) -> List[Tuple[str, None]]:
+        """Calls the Search Refinement Agent to get a new search plan based on failure."""
+        self.log_message.emit("\n" + "="*25 + "\n[RefinerAgent] Calling to improve failed search...\n" + "="*25)
+        self.progress.emit("Refining search plan based on feedback...")
+        
+        refiner_prompt = f"""ORIGINAL USER QUERY: {self.prompt}
+        FAILED SEARCH QUERY: {failed_query}
+        FAILURE REASON: {failure_reason}
+        """
+        
+        try:
+            messages = self.refiner_messages + [{'role': 'user', 'content': refiner_prompt}]
+            response = ollama.chat(model='qwen3:14b', messages=messages, stream=False)
+            plan = response['message']['content'].strip()
+            self.log_message.emit(f"[RefinerAgent] Refined plan received:\n{plan}")
+            
+            # Parse the topics from the <refined_plan>
+            topics = re.findall(r'<topic>(.*?)</topic>', plan, re.DOTALL)
+            if topics:
+                # Return as a list of search request tuples (query, domain=None)
+                refined_requests = [(topic.strip(), None) for topic in topics]
+                self.log_message.emit(f"[RefinerAgent] Parsed {len(refined_requests)} new search topics.")
+                return refined_requests
+            else:
+                self.log_message.emit("[RefinerAgent] No topics found in the refined plan.")
+                return []
+        except Exception as e:
+            self.log_message.emit(f"[RefinerAgent] Failed: {e}. Cannot refine search.")
+            return []
+
     def run(self):
         try:
             self.log_message.emit("\n" + "─"*15 + " New Request Started " + "─"*15)
             
-            # MODIFICATION: This list will hold the ground truth for all sources used.
             sources_used_for_synthesis = []
             final_response = ""
+            search_requests = []
+            initial_model_response = "" 
 
             if self.force_search:
+                self.log_message.emit("[ForceSearch] Mode enabled. Bypassing model's search decision.")
+                self.progress.emit("Forcing search plan generation...")
                 search_plan = self._get_search_plan(self.prompt)
                 if search_plan:
-                    self.prompt = f"{search_plan}\n\nOriginal Query: {self.prompt}"
-            
-            self.log_message.emit(f"User Prompt (with plan if any):\n{self.prompt}")
-
-            system_message = self.main_messages[0]
-            
-            relevant_history = self.memory.retrieve_relevant_messages(self.prompt, top_k=3, last_n=2)
-            
-            sanitized_history = []
-            for msg in relevant_history:
-                if msg['role'] == 'assistant':
-                    clean_content = re.sub(r'<think>.*?</think>', '', msg['content'], flags=re.DOTALL)
-                    clean_content = re.sub(r'<search_request>.*?</search_request>', '', clean_content, flags=re.DOTALL).strip()
-                    sanitized_history.append({'role': 'assistant', 'content': clean_content})
+                    topics = re.findall(r'<topic>(.*?)</topic>', search_plan, re.DOTALL)
+                    if topics:
+                        search_requests = [(topic.strip(), None) for topic in topics]
+                        self.log_message.emit(f"[ForceSearch] Plan parsed into {len(search_requests)} search operations.")
+                        self.prompt = f"{search_plan}\n\nOriginal Query: {self.prompt}"
+                    else:
+                        self.log_message.emit("[ForceSearch] Plan was generated but no topics found. Using original prompt as fallback.")
+                        search_requests = [(self.prompt, None)]
                 else:
-                    sanitized_history.append(msg)
-            
-            current_user_message = {'role': 'user', 'content': self.prompt}
-            
-            messages_for_planning = [system_message] + sanitized_history + [current_user_message]
-            self.log_message.emit(f"Building context with {len(sanitized_history)} SANITIZED relevant messages.")
+                    self.log_message.emit("[ForceSearch] Failed to generate a plan. Using original prompt as fallback.")
+                    search_requests = [(self.prompt, None)]
+            else:
+                self.log_message.emit("Standard mode. Letting model decide if search is needed.")
+                system_message = self.main_messages[0]
+                relevant_history = self.memory.retrieve_relevant_messages(self.prompt, top_k=3, last_n=2)
+                
+                sanitized_history = []
+                for msg in relevant_history:
+                    if msg['role'] == 'assistant':
+                        clean_content = re.sub(r'<think>.*?</think>', '', msg['content'], flags=re.DOTALL)
+                        clean_content = re.sub(r'<search_request>.*?</search_request>', '', clean_content, flags=re.DOTALL).strip()
+                        sanitized_history.append({'role': 'assistant', 'content': clean_content})
+                    else:
+                        sanitized_history.append(msg)
+                
+                current_user_message = {'role': 'user', 'content': self.prompt}
+                messages_for_planning = [system_message] + sanitized_history + [current_user_message]
+                self.log_message.emit(f"Building context with {len(sanitized_history)} SANITIZED relevant messages.")
 
-            self.progress.emit("Analyzing query and planning response...")
-            initial_model_response = self.get_ollama_response(messages=messages_for_planning)
-            search_requests = self.extract_search_requests(initial_model_response)
+                self.progress.emit("Analyzing query and planning response...")
+                initial_model_response = self.get_ollama_response(messages=messages_for_planning)
+                search_requests = self.extract_search_requests(initial_model_response)
 
             if len(search_requests) > 1:
                 self.log_message.emit(f"Model attempted {len(search_requests)} searches. Limiting to 1 for quality.")
                 search_requests = search_requests[:1]
 
             if search_requests:
-                self.log_message.emit(f"[Search] Performing targeted search based on model analysis.")
-                # MODIFICATION: `execute_search_plan` now returns sources.
+                self.log_message.emit(f"[Search] Performing targeted search based on {'forced plan' if self.force_search else 'model analysis'}.")
+
+                system_message = self.main_messages[0]
+                relevant_history = self.memory.retrieve_relevant_messages(self.prompt, top_k=3, last_n=2)
+                sanitized_history = []
+                for msg in relevant_history:
+                    if msg['role'] == 'assistant':
+                        clean_content = re.sub(r'<think>.*?</think>', '', msg['content'], flags=re.DOTALL)
+                        clean_content = re.sub(r'<search_request>.*?</search_request>', '', clean_content, flags=re.DOTALL).strip()
+                        sanitized_history.append({'role': 'assistant', 'content': clean_content})
+                    else:
+                        sanitized_history.append(msg)
+                current_user_message = {'role': 'user', 'content': self.prompt}
+                messages_for_planning = [system_message] + sanitized_history + [current_user_message]
+                
                 scraped_content, sources_from_search = self.execute_search_plan(search_requests)
 
                 if not scraped_content.strip():
@@ -363,7 +462,6 @@ class SearchWorker(QThread):
                         self.log_message.emit("[Validator] Content passed relevance check.")
                         self.progress.emit("Synthesizing validated response...")
                         
-                        # MODIFICATION: Add the verified sources to our ground-truth list.
                         sources_used_for_synthesis.extend(sources_from_search)
 
                         synthesis_prompt = f"""<think>
@@ -396,7 +494,6 @@ class SearchWorker(QThread):
                                     self.log_message.emit("[Validator] Additional search content passed.")
                                     self.progress.emit("Synthesizing final response with all data...")
                                     
-                                    # MODIFICATION: Add the new sources to our ground-truth list.
                                     sources_used_for_synthesis.extend(sources_from_add_search)
 
                                     final_synthesis_prompt = f"""<think>
@@ -436,29 +533,50 @@ class SearchWorker(QThread):
                                 final_response = self.get_ollama_response(messages=messages_for_fallback)
                         else:
                             final_response = synthesis_response_1
-                    else:
+                    else: # --- MODIFIED RETRY LOGIC ---
                         self.log_message.emit(f"[Validator] Content failed: {validation_result}")
-                        self.progress.emit("Content failed validation, attempting refined search...")
+                        self.progress.emit("Content failed validation, attempting intelligent refinement...")
                         
-                        refined_content, sources_from_refined = self.retry_search_with_refinement(search_requests[0])
-                        if refined_content:
-                            # MODIFICATION: Add the refined sources to our ground-truth list.
-                            sources_used_for_synthesis.extend(sources_from_refined)
-                            refined_synthesis_prompt = f"""<think>
-                            The first search failed validation. I have conducted a refined search which yielded better results. I will now synthesize this new content into the final answer.
-                            </think>
+                        failed_query = search_requests[0][0] # Get the query string that failed
+                        refined_plan_queries = self._get_refined_search_plan(failed_query, validation_result)
+                        
+                        refined_content_found = False
+                        if refined_plan_queries:
+                            # Loop through the new, smarter queries
+                            for i, refined_search in enumerate(refined_plan_queries):
+                                self.log_message.emit(f"[RefinedSearch] Attempt {i+1}/{len(refined_plan_queries)}: '{refined_search[0]}'")
+                                refined_content, sources_from_refined = self.execute_search_plan([refined_search])
+                                
+                                if refined_content:
+                                    # Validate the new content
+                                    refined_validation = self.validate_scraped_content(self.prompt, refined_content)
+                                    if refined_validation == "pass":
+                                        self.log_message.emit("[Validator] Refined search content PASSED validation.")
+                                        self.progress.emit("Synthesizing refined response...")
+                                        
+                                        sources_used_for_synthesis.extend(sources_from_refined)
+                                        refined_synthesis_prompt = f"""<think>
+                                        The first search failed validation. I have conducted a refined search which yielded better results. I will now synthesize this new content into the final answer.
+                                        </think>
 
-                            REFINED SEARCH RESULTS:
-                            {refined_content}
+                                        REFINED SEARCH RESULTS:
+                                        {refined_content}
 
-                            Instructions: Based on these new search results, please give a comprehensive answer to the user's last question. Include proper source citations."""
-                            messages_for_refined_synthesis = messages_for_planning + [
-                                {'role': 'assistant', 'content': initial_model_response},
-                                {'role': 'user', 'content': refined_synthesis_prompt}
-                            ]
-                            final_response = self.get_ollama_response(messages=messages_for_refined_synthesis)
-                        else:
-                            self.log_message.emit("[Search] Primary and refined searches failed validation.")
+                                        Instructions: Based on these new search results, please give a comprehensive answer to the user's last question. Include proper source citations."""
+                                        messages_for_refined_synthesis = messages_for_planning + [
+                                            {'role': 'assistant', 'content': initial_model_response},
+                                            {'role': 'user', 'content': refined_synthesis_prompt}
+                                        ]
+                                        final_response = self.get_ollama_response(messages=messages_for_refined_synthesis)
+                                        refined_content_found = True
+                                        break # Exit the loop on success
+                                    else:
+                                        self.log_message.emit(f"[Validator] Refined attempt {i+1} also failed: {refined_validation}")
+                                else:
+                                     self.log_message.emit(f"[RefinedSearch] Attempt {i+1} yielded no content.")
+                        
+                        if not refined_content_found:
+                            self.log_message.emit("[Search] All refined search attempts failed.")
                             prompt_for_failed_search = "Both the primary and refined web searches failed to return useful content. Please inform the user that you couldn't find relevant information online and answer their last question using only your existing knowledge."
                             messages_for_final_fallback = messages_for_planning + [
                                 {'role': 'assistant', 'content': initial_model_response},
@@ -470,7 +588,6 @@ class SearchWorker(QThread):
                 self.log_message.emit("Model determined no search needed. Using existing knowledge.")
                 final_response = initial_model_response
 
-            # MODIFICATION: The final, deterministic attachment step.
             final_response_with_sources = self._attach_sources_to_response(final_response, sources_used_for_synthesis)
 
             self.log_message.emit("─"*17 + " Request Completed " + "─"*16 + "\n")
@@ -491,7 +608,6 @@ class SearchWorker(QThread):
             self.progress.emit(f"Searching for '{query}'...")
             self.log_message.emit(f"Executing search: '{query}'" + (f" on '{domain}'" if domain else ""))
             
-            # MODIFICATION: Function now returns sources list.
             content, success_count, source_quality, sources = self.perform_single_search_and_scrape(query, domain)
             
             if success_count == 0 and domain:
@@ -537,12 +653,11 @@ class SearchWorker(QThread):
             
             for i, (url, score) in enumerate(urls_to_scrape):
                 self.progress.emit(f"Extracting from source {i+1}/{len(urls_to_scrape)}...")
-                # MODIFICATION: Scraper now returns a source dictionary.
                 scraped_data, success, content_length, source_info = self.scrape_with_enhanced_extraction(url)
                 
                 if success and content_length > 200:
                     scraped_results_content.append(scraped_data)
-                    scraped_sources_list.append(source_info) # Capture the ground truth.
+                    scraped_sources_list.append(source_info) 
                     success_count += 1
                     total_content_length += content_length
                     self.log_message.emit(f"[Scraper] Extracted: {url} ({content_length} chars, rank score: {score:.1f})")
@@ -718,7 +833,6 @@ class SearchWorker(QThread):
         match = re.search(pattern, text.strip(), re.DOTALL | re.IGNORECASE)
         if match:
             query = match.group(1).strip()
-            # Ensure the response is ONLY the tag, with maybe some whitespace
             if text.strip() == match.group(0).strip() and len(query) > 3:
                 return query
         return ""
@@ -743,46 +857,12 @@ class SearchWorker(QThread):
                 fail_match = re.search(r'<fail>(.*?)</fail>', validator_output, re.IGNORECASE | re.DOTALL)
                 return fail_match.group(1).strip() if fail_match else "Content failed validation"
             else:
+                self.log_message.emit("Validator response was ambiguous. Defaulting to pass.")
                 return "pass"
                 
         except Exception as e:
-            self.log_message.emit(f"Validator agent failed: {e}")
+            self.log_message.emit(f"Validator agent failed: {e}. Defaulting to pass.")
             return "pass"
-
-    def retry_search_with_refinement(self, original_search: Tuple[str, str]) -> Tuple[str, List[Dict]]:
-        """Retry search and return content string and a list of source dicts."""
-        original_query, original_domain = original_search
-        
-        self.log_message.emit("Attempting refined search...")
-        
-        refined_queries = []
-        
-        if "recent" not in original_query.lower():
-            refined_queries.append((f"{original_query} recent latest 2024", original_domain))
-            
-        if original_domain:
-            if "finance.yahoo.com" in original_domain:
-                refined_queries.append((original_query, "marketwatch.com"))
-            elif "reuters.com" in original_domain:
-                refined_queries.append((original_query, "apnews.com"))
-        
-        refined_queries.append((f"{original_query} news update", None))
-        
-        for refined_query, refined_domain in refined_queries[:6]:
-            self.log_message.emit(f"Trying refined search: '{refined_query}'" + (f" on {refined_domain}" if refined_domain else ""))
-            
-            content, success_count, quality, sources = self.perform_single_search_and_scrape(refined_query, refined_domain)
-            
-            if success_count > 0:
-                validation_result = self.validate_scraped_content(self.prompt, content)
-                if validation_result == "pass":
-                    self.log_message.emit("[Validator] Refined search passed validation.")
-                    return content, sources
-                else:
-                    self.log_message.emit(f"[Validator] Refined search also failed: {validation_result}")
-            
-        self.log_message.emit("[Search] All refined search attempts failed.")
-        return "", []
 
     def get_ollama_response(self, messages: list) -> str:
         """Get response from the main Ollama model using a list of messages."""
@@ -830,10 +910,8 @@ class SearchWorker(QThread):
         if not sources:
             return response_text
 
-        # Remove any <sources> block the model might have generated.
         clean_response = re.sub(r'<sources>.*?</sources>', '', response_text, flags=re.DOTALL).strip()
 
-        # Build the new, guaranteed-correct sources block.
         sources_lines = []
         for source in sources:
             sources_lines.append(f'<source url="{source["url"]}" date="{source["date"]}">{source["title"]}</source>')
@@ -1077,7 +1155,7 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel("Ready")
         self.status_label.setObjectName("statusLabel")
         
-        self.clear_button = QPushButton("✨ New Chat")
+        self.clear_button = QPushButton("New Chat")
         self.clear_button.setObjectName("clearButton")
         self.clear_button.clicked.connect(self.clear_chat_session)
         
@@ -1271,7 +1349,6 @@ class MainWindow(QMainWindow):
 
     def handle_error(self, error: str, original_prompt: str):
         """Handles an error from the worker."""
-        # MODIFICATION: Removed emoji for cleaner UI/logs
         error_msg = f"Error: {error}"
         self.add_message_to_ui(error_msg, is_user=False)
         

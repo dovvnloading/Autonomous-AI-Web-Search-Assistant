@@ -16,7 +16,7 @@ from bs4 import BeautifulSoup
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QTextEdit, QPushButton, QLabel,
                              QFrame, QScrollArea, QProgressBar, QSplitter)
-from PySide6.QtCore import Qt, QThread, Signal, QPropertyAnimation, QEasingCurve
+from PySide6.QtCore import QTimer, Qt, QThread, Signal, QPropertyAnimation, QEasingCurve
 
 # --- NEW: SEMANTIC MEMORY CLASS ---
 class SemanticMemory:
@@ -26,10 +26,10 @@ class SemanticMemory:
         self.memory = []
         self.log_callback = log_callback
 
-    def _log(self, message):
+    def _log(self, message, level="MEMORY"):
         if self.log_callback:
-            # MODIFICATION: Removed emoji for cleaner logs
-            self.log_callback(f"[SemanticMemory] {message}")
+            # MODIFICATION: Now passes a level along with the message
+            self.log_callback(f"{message}", level)
 
     def _get_embedding(self, text: str) -> np.ndarray:
         """Generates an embedding for a given text."""
@@ -37,7 +37,7 @@ class SemanticMemory:
             response = ollama.embeddings(model=self.model, prompt=text)
             return np.array(response['embedding'])
         except Exception as e:
-            self._log(f"Error generating embedding: {e}")
+            self._log(f"Error generating embedding: {e}", "ERROR")
             return np.zeros(768) # Assuming nomic-embed-text has a dimension of 768
 
     @staticmethod
@@ -71,20 +71,18 @@ class SemanticMemory:
             self._log("Memory is empty. No messages to retrieve.")
             return []
 
-        self._log(f"Retrieving contextual history: {top_k} semantic messages + last {last_n} guaranteed messages.")
+        self._log(f"Retrieving contextual history: {top_k} semantic + last {last_n} guaranteed.")
 
-        # Step 1: Guarantee the last 'n' messages for immediate conversational context.
         actual_last_n = min(last_n, len(self.memory))
         guaranteed_messages = self.memory[-actual_last_n:]
         if guaranteed_messages:
-            self._log(f"  -> Guaranteed retrieval of last {len(guaranteed_messages)} messages.")
+            self._log(f"Guaranteed retrieval of last {len(guaranteed_messages)} messages.", "INFO")
 
-        # Step 2: Perform semantic search on the *rest* of the history for long-term context.
         searchable_memory = self.memory[:-actual_last_n] if len(self.memory) > actual_last_n else []
         
         semantic_messages = []
         if searchable_memory and top_k > 0:
-            self._log(f"Searching for {top_k} semantically relevant messages in remaining {len(searchable_memory)} memories...")
+            self._log(f"Searching {top_k} semantic messages in remaining {len(searchable_memory)} memories...", "INFO")
             query_embedding = self._get_embedding(query)
 
             scored_messages = []
@@ -96,17 +94,15 @@ class SemanticMemory:
 
             for item in scored_messages[:top_k]:
                 message_content = item['message']['content']
-                self._log(f"  -> Retrieved semantically (Score: {item['score']:.4f}): '{message_content[:60]}...'")
+                self._log(f"Retrieved semantically (Score: {item['score']:.4f}): '{message_content[:60]}...'", "INFO")
                 semantic_messages.append(item['message'])
         elif top_k <= 0:
-             self._log("Semantic search skipped (top_k=0).")
+             self._log("Semantic search skipped (top_k=0).", "INFO")
         else:
-            self._log("No older messages available for semantic search.")
+            self._log("No older messages available for semantic search.", "INFO")
 
-        # Step 3: Combine the two lists.
         combined_messages = semantic_messages + guaranteed_messages
 
-        # Step 4: Format the final list for output
         final_history = []
         for msg in combined_messages:
             final_history.append({
@@ -114,7 +110,7 @@ class SemanticMemory:
                 'content': msg['content']
             })
         
-        self._log(f"  -> Final contextual history contains {len(final_history)} messages.")
+        self._log(f"Final contextual history contains {len(final_history)} messages.")
         return final_history
 
     def clear(self):
@@ -291,7 +287,8 @@ class SearchWorker(QThread):
     finished = Signal(str)
     error = Signal(str)
     progress = Signal(str)
-    log_message = Signal(str)
+    # MODIFICATION: Signal now emits a message string and a level string
+    log_message = Signal(str, str)
 
     HEADERS = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -311,13 +308,12 @@ class SearchWorker(QThread):
         )
         self.main_messages = [{'role': 'system', 'content': formatted_main_prompt}]
         self.validator_messages = [{'role': 'system', 'content': VALIDATOR_PROMPT}]
-        # NEW: Add refiner prompt to instance
         self.refiner_messages = [{'role': 'system', 'content': REFINER_PROMPT}]
 
 
     def _get_search_plan(self, user_query: str) -> str:
         """Calls the Search Intent Agent to decompose the user query, now WITH conversational context."""
-        self.log_message.emit("\n" + "="*25 + "\n[IntentAgent] Calling with conversational context...\n" + "="*25)
+        self.log_message.emit("Calling IntentAgent with conversational context...", "AGENT_CALL")
         self.progress.emit("Decomposing query for targeted search...")
         try:
             relevant_history = self.memory.retrieve_relevant_messages(user_query, top_k=3, last_n=2)
@@ -331,7 +327,7 @@ class SearchWorker(QThread):
                 else:
                     sanitized_history.append(msg)
             
-            self.log_message.emit(f"[IntentAgent] Providing {len(sanitized_history)} contextual messages.")
+            self.log_message.emit(f"Providing {len(sanitized_history)} contextual messages to IntentAgent.", "INFO")
             
             system_message = {'role': 'system', 'content': SEARCH_INTENT_PROMPT}
             current_user_message = {'role': 'user', 'content': user_query}
@@ -340,16 +336,15 @@ class SearchWorker(QThread):
             
             response = ollama.chat(model='qwen3:8b', messages=messages, stream=False)
             plan = response['message']['content'].strip()
-            self.log_message.emit(f"[IntentAgent] Plan received:\n{plan}\n")
+            self.log_message.emit(f"IntentAgent Plan received:\n{plan}", "PAYLOAD")
             return plan
         except Exception as e:
-            self.log_message.emit(f"[IntentAgent] Failed: {e}. Proceeding without plan.\n")
+            self.log_message.emit(f"IntentAgent Failed: {e}. Proceeding without plan.", "ERROR")
             return ""
 
-    # NEW: Method to call the refinement agent
     def _get_refined_search_plan(self, failed_query: str, failure_reason: str) -> List[Tuple[str, None]]:
         """Calls the Search Refinement Agent to get a new search plan based on failure."""
-        self.log_message.emit("\n" + "="*25 + "\n[RefinerAgent] Calling to improve failed search...\n" + "="*25)
+        self.log_message.emit("Calling RefinerAgent to improve failed search...", "AGENT_CALL")
         self.progress.emit("Refining search plan based on feedback...")
         
         refiner_prompt = f"""ORIGINAL USER QUERY: {self.prompt}
@@ -359,27 +354,25 @@ class SearchWorker(QThread):
         
         try:
             messages = self.refiner_messages + [{'role': 'user', 'content': refiner_prompt}]
-            response = ollama.chat(model='qwen3:14b', messages=messages, stream=False)
+            response = ollama.chat(model='qwen3:8b', messages=messages, stream=False)
             plan = response['message']['content'].strip()
-            self.log_message.emit(f"[RefinerAgent] Refined plan received:\n{plan}")
+            self.log_message.emit(f"RefinerAgent plan received:\n{plan}", "PAYLOAD")
             
-            # Parse the topics from the <refined_plan>
             topics = re.findall(r'<topic>(.*?)</topic>', plan, re.DOTALL)
             if topics:
-                # Return as a list of search request tuples (query, domain=None)
                 refined_requests = [(topic.strip(), None) for topic in topics]
-                self.log_message.emit(f"[RefinerAgent] Parsed {len(refined_requests)} new search topics.")
+                self.log_message.emit(f"RefinerAgent parsed {len(refined_requests)} new search topics.", "INFO")
                 return refined_requests
             else:
-                self.log_message.emit("[RefinerAgent] No topics found in the refined plan.")
+                self.log_message.emit("RefinerAgent produced a plan, but no topics were found in it.", "WARN")
                 return []
         except Exception as e:
-            self.log_message.emit(f"[RefinerAgent] Failed: {e}. Cannot refine search.")
+            self.log_message.emit(f"RefinerAgent Failed: {e}. Cannot refine search.", "ERROR")
             return []
 
     def run(self):
         try:
-            self.log_message.emit("\n" + "─"*15 + " New Request Started " + "─"*15)
+            self.log_message.emit("New Request Started", "STEP")
             
             sources_used_for_synthesis = []
             final_response = ""
@@ -387,23 +380,23 @@ class SearchWorker(QThread):
             initial_model_response = "" 
 
             if self.force_search:
-                self.log_message.emit("[ForceSearch] Mode enabled. Bypassing model's search decision.")
+                self.log_message.emit("Force Search mode enabled. Bypassing model's search decision.", "STEP")
                 self.progress.emit("Forcing search plan generation...")
                 search_plan = self._get_search_plan(self.prompt)
                 if search_plan:
                     topics = re.findall(r'<topic>(.*?)</topic>', search_plan, re.DOTALL)
                     if topics:
                         search_requests = [(topic.strip(), None) for topic in topics]
-                        self.log_message.emit(f"[ForceSearch] Plan parsed into {len(search_requests)} search operations.")
+                        self.log_message.emit(f"Forced plan parsed into {len(search_requests)} search operations.", "INFO")
                         self.prompt = f"{search_plan}\n\nOriginal Query: {self.prompt}"
                     else:
-                        self.log_message.emit("[ForceSearch] Plan was generated but no topics found. Using original prompt as fallback.")
+                        self.log_message.emit("Plan was generated but no topics found. Using original prompt as fallback.", "WARN")
                         search_requests = [(self.prompt, None)]
                 else:
-                    self.log_message.emit("[ForceSearch] Failed to generate a plan. Using original prompt as fallback.")
+                    self.log_message.emit("Failed to generate a forced plan. Using original prompt as fallback.", "WARN")
                     search_requests = [(self.prompt, None)]
             else:
-                self.log_message.emit("Standard mode. Letting model decide if search is needed.")
+                self.log_message.emit("Standard mode: Letting model decide if search is needed.", "STEP")
                 system_message = self.main_messages[0]
                 relevant_history = self.memory.retrieve_relevant_messages(self.prompt, top_k=3, last_n=2)
                 
@@ -418,18 +411,19 @@ class SearchWorker(QThread):
                 
                 current_user_message = {'role': 'user', 'content': self.prompt}
                 messages_for_planning = [system_message] + sanitized_history + [current_user_message]
-                self.log_message.emit(f"Building context with {len(sanitized_history)} SANITIZED relevant messages.")
+                self.log_message.emit(f"Building context with {len(sanitized_history)} sanitized relevant messages.", "INFO")
 
                 self.progress.emit("Analyzing query and planning response...")
                 initial_model_response = self.get_ollama_response(messages=messages_for_planning)
                 search_requests = self.extract_search_requests(initial_model_response)
 
             if len(search_requests) > 1:
-                self.log_message.emit(f"Model attempted {len(search_requests)} searches. Limiting to 1 for quality.")
+                self.log_message.emit(f"Model attempted {len(search_requests)} searches. Limiting to 1 for quality.", "WARN")
                 search_requests = search_requests[:1]
 
             if search_requests:
-                self.log_message.emit(f"[Search] Performing targeted search based on {'forced plan' if self.force_search else 'model analysis'}.")
+                search_basis = 'forced plan' if self.force_search else 'model analysis'
+                self.log_message.emit(f"Performing targeted search based on {search_basis}.", "STEP")
 
                 system_message = self.main_messages[0]
                 relevant_history = self.memory.retrieve_relevant_messages(self.prompt, top_k=3, last_n=2)
@@ -447,7 +441,7 @@ class SearchWorker(QThread):
                 scraped_content, sources_from_search = self.execute_search_plan(search_requests)
 
                 if not scraped_content.strip():
-                    self.log_message.emit("[Search] No usable content. Responding with available knowledge.")
+                    self.log_message.emit("Search returned no usable content. Responding with available knowledge.", "WARN")
                     prompt_for_no_search = "The web search failed to return any content. Please answer the user's last question using only your existing knowledge, without mentioning the failed search."
                     messages_for_fallback = messages_for_planning + [
                         {'role': 'assistant', 'content': initial_model_response},
@@ -459,7 +453,7 @@ class SearchWorker(QThread):
                     validation_result = self.validate_scraped_content(self.prompt, scraped_content)
                     
                     if validation_result == "pass":
-                        self.log_message.emit("[Validator] Content passed relevance check.")
+                        self.log_message.emit("Validator: Content passed relevance check.", "INFO")
                         self.progress.emit("Synthesizing validated response...")
                         
                         sources_used_for_synthesis.extend(sources_from_search)
@@ -467,10 +461,7 @@ class SearchWorker(QThread):
                         synthesis_prompt = f"""<think>
                         The initial search was successful and the validator confirmed the content is relevant. Now I will synthesize this information into a clear, concise answer for the user, making sure to include citations from the provided content.
                         </think>
-
-                        VALIDATED SEARCH RESULTS:
-                        {scraped_content}
-
+                        VALIDATED SEARCH RESULTS:{scraped_content}
                         Instructions: Based on the provided search results, please give a comprehensive answer to the user's last question. 
                         """
                         messages_for_synthesis = messages_for_planning + [
@@ -481,7 +472,7 @@ class SearchWorker(QThread):
 
                         additional_query = self.extract_additional_search(synthesis_response_1)
                         if additional_query:
-                            self.log_message.emit(f"[Model] Requested additional search for: '{additional_query}'")
+                            self.log_message.emit(f"Model requested additional search for: '{additional_query}'", "STEP")
                             self.progress.emit("Performing additional search requested by model...")
                             
                             additional_scraped_content, sources_from_add_search = self.execute_search_plan([(additional_query, None)])
@@ -491,77 +482,57 @@ class SearchWorker(QThread):
                                 additional_validation = self.validate_scraped_content(self.prompt, additional_scraped_content)
 
                                 if additional_validation == "pass":
-                                    self.log_message.emit("[Validator] Additional search content passed.")
+                                    self.log_message.emit("Validator: Additional search content passed.", "INFO")
                                     self.progress.emit("Synthesizing final response with all data...")
-                                    
                                     sources_used_for_synthesis.extend(sources_from_add_search)
-
                                     final_synthesis_prompt = f"""<think>
                                     My first search provided some information, but I determined it was insufficient and requested an additional search for '{additional_query}'. That search was successful. Now I have the results from both searches and will combine them into a single, comprehensive final answer.
                                     </think>
-
-                                    INITIAL SEARCH RESULTS:
-                                    {scraped_content}
-
-                                    ADDITIONAL SEARCH RESULTS:
-                                    {additional_scraped_content}
-
-                                    Instructions: Based on the combined information from BOTH sets of search results, please give a final, comprehensive answer to the user's last question. It is critical to synthesize information from both contexts 
-                                    """
+                                    INITIAL SEARCH RESULTS:{scraped_content}
+                                    ADDITIONAL SEARCH RESULTS:{additional_scraped_content}
+                                    Instructions: Based on the combined information from BOTH sets of search results, please give a final, comprehensive answer to the user's last question. It is critical to synthesize information from both contexts."""
                                     messages_for_final_synthesis = messages_for_synthesis + [
                                         {'role': 'assistant', 'content': synthesis_response_1},
                                         {'role': 'user', 'content': final_synthesis_prompt}
                                     ]
                                     final_response = self.get_ollama_response(messages=messages_for_final_synthesis)
                                 else:
-                                    self.log_message.emit("[Validator] Additional search content FAILED validation. Using initial results only.")
-                                    fallback_prompt = f"""<think>
-                                    I attempted an additional search for '{additional_query}', but the results were not relevant. I must now answer using only the initial search results. I will answer the user's question as best I can with the information I have.
-                                    </think>
+                                    self.log_message.emit("Validator: Additional search content FAILED. Using initial results only.", "WARN")
+                                    fallback_prompt = f"""<think>I attempted an additional search for '{additional_query}', but the results were not relevant. I must now answer using only the initial search results. I will answer the user's question as best I can with the information I have.</think>
                                     INITIAL SEARCH RESULTS:{scraped_content}
                                     Instructions: Your additional search failed validation. Answer the user's question using ONLY the initial search results provided above."""
                                     messages_for_fallback = messages_for_synthesis + [{'role': 'assistant', 'content': synthesis_response_1}, {'role': 'user', 'content': fallback_prompt}]
                                     final_response = self.get_ollama_response(messages=messages_for_fallback)
                             else:
-                                self.log_message.emit("[Search] Additional search returned no content. Using initial results only.")
-                                fallback_prompt = f"""<think>
-                                I attempted an additional search for '{additional_query}', but it returned no usable content. I must now answer using only the initial search results. I will answer the user's question as best I can with the information I have.
-                                </think>
+                                self.log_message.emit("Additional search returned no content. Using initial results only.", "WARN")
+                                fallback_prompt = f"""<think>I attempted an additional search for '{additional_query}', but it returned no usable content. I must now answer using only the initial search results. I will answer the user's question as best I can with the information I have.</think>
                                 INITIAL SEARCH RESULTS:{scraped_content}
                                 Instructions: Your additional search failed to find anything. Answer the user's question using ONLY the initial search results provided above."""
                                 messages_for_fallback = messages_for_synthesis + [{'role': 'assistant', 'content': synthesis_response_1}, {'role': 'user', 'content': fallback_prompt}]
                                 final_response = self.get_ollama_response(messages=messages_for_fallback)
                         else:
                             final_response = synthesis_response_1
-                    else: # --- MODIFIED RETRY LOGIC ---
-                        self.log_message.emit(f"[Validator] Content failed: {validation_result}")
+                    else: 
+                        self.log_message.emit(f"Validator: Content FAILED: {validation_result}", "WARN")
                         self.progress.emit("Content failed validation, attempting intelligent refinement...")
                         
-                        failed_query = search_requests[0][0] # Get the query string that failed
+                        failed_query = search_requests[0][0]
                         refined_plan_queries = self._get_refined_search_plan(failed_query, validation_result)
                         
                         refined_content_found = False
                         if refined_plan_queries:
-                            # Loop through the new, smarter queries
                             for i, refined_search in enumerate(refined_plan_queries):
-                                self.log_message.emit(f"[RefinedSearch] Attempt {i+1}/{len(refined_plan_queries)}: '{refined_search[0]}'")
+                                self.log_message.emit(f"Refined Search Attempt {i+1}/{len(refined_plan_queries)}: '{refined_search[0]}'", "STEP")
                                 refined_content, sources_from_refined = self.execute_search_plan([refined_search])
                                 
                                 if refined_content:
-                                    # Validate the new content
                                     refined_validation = self.validate_scraped_content(self.prompt, refined_content)
                                     if refined_validation == "pass":
-                                        self.log_message.emit("[Validator] Refined search content PASSED validation.")
+                                        self.log_message.emit("Validator: Refined search content PASSED.", "INFO")
                                         self.progress.emit("Synthesizing refined response...")
-                                        
                                         sources_used_for_synthesis.extend(sources_from_refined)
-                                        refined_synthesis_prompt = f"""<think>
-                                        The first search failed validation. I have conducted a refined search which yielded better results. I will now synthesize this new content into the final answer.
-                                        </think>
-
-                                        REFINED SEARCH RESULTS:
-                                        {refined_content}
-
+                                        refined_synthesis_prompt = f"""<think>The first search failed validation. I have conducted a refined search which yielded better results. I will now synthesize this new content into the final answer.</think>
+                                        REFINED SEARCH RESULTS:{refined_content}
                                         Instructions: Based on these new search results, please give a comprehensive answer to the user's last question. Include proper source citations."""
                                         messages_for_refined_synthesis = messages_for_planning + [
                                             {'role': 'assistant', 'content': initial_model_response},
@@ -569,14 +540,14 @@ class SearchWorker(QThread):
                                         ]
                                         final_response = self.get_ollama_response(messages=messages_for_refined_synthesis)
                                         refined_content_found = True
-                                        break # Exit the loop on success
+                                        break 
                                     else:
-                                        self.log_message.emit(f"[Validator] Refined attempt {i+1} also failed: {refined_validation}")
+                                        self.log_message.emit(f"Validator: Refined attempt {i+1} also FAILED: {refined_validation}", "WARN")
                                 else:
-                                     self.log_message.emit(f"[RefinedSearch] Attempt {i+1} yielded no content.")
+                                     self.log_message.emit(f"Refined attempt {i+1} yielded no content.", "WARN")
                         
                         if not refined_content_found:
-                            self.log_message.emit("[Search] All refined search attempts failed.")
+                            self.log_message.emit("All primary and refined search attempts failed.", "ERROR")
                             prompt_for_failed_search = "Both the primary and refined web searches failed to return useful content. Please inform the user that you couldn't find relevant information online and answer their last question using only your existing knowledge."
                             messages_for_final_fallback = messages_for_planning + [
                                 {'role': 'assistant', 'content': initial_model_response},
@@ -585,18 +556,18 @@ class SearchWorker(QThread):
                             final_response = self.get_ollama_response(messages=messages_for_final_fallback)
             else:
                 self.progress.emit("Responding with existing knowledge...")
-                self.log_message.emit("Model determined no search needed. Using existing knowledge.")
+                self.log_message.emit("Model determined no search needed. Using existing knowledge.", "STEP")
                 final_response = initial_model_response
 
             final_response_with_sources = self._attach_sources_to_response(final_response, sources_used_for_synthesis)
 
-            self.log_message.emit("─"*17 + " Request Completed " + "─"*16 + "\n")
+            self.log_message.emit("Request Completed", "STEP")
             self.finished.emit(final_response_with_sources)
 
         except Exception as e:
             import traceback
             error_str = f"An error occurred: {e}\n{traceback.format_exc()}"
-            self.log_message.emit(f"ERROR: {error_str}")
+            self.log_message.emit(error_str, "ERROR")
             self.error.emit(str(e))
 
     def execute_search_plan(self, search_requests: List[Tuple[str, str]]) -> Tuple[str, List[Dict]]:
@@ -606,17 +577,17 @@ class SearchWorker(QThread):
         
         for query, domain in search_requests:
             self.progress.emit(f"Searching for '{query}'...")
-            self.log_message.emit(f"Executing search: '{query}'" + (f" on '{domain}'" if domain else ""))
+            self.log_message.emit(f"Executing search: '{query}'" + (f" on '{domain}'" if domain else ""), "INFO")
             
             content, success_count, source_quality, sources = self.perform_single_search_and_scrape(query, domain)
             
             if success_count == 0 and domain:
-                self.log_message.emit(f"Domain-specific search failed. Attempting broader search.")
+                self.log_message.emit(f"Domain-specific search failed. Attempting broader search.", "WARN")
                 self.progress.emit(f"Broadening search scope...")
                 content, success_count, source_quality, sources = self.perform_single_search_and_scrape(query, domain=None)
-                self.log_message.emit(f"Fallback completed: {success_count} sources, quality: {source_quality}")
+                self.log_message.emit(f"Fallback completed: {success_count} sources, quality: {source_quality}", "INFO")
             elif success_count > 0:
-                self.log_message.emit(f"Search successful: {success_count} sources, quality: {source_quality}")
+                self.log_message.emit(f"Search successful: {success_count} sources, quality: {source_quality}", "INFO")
             
             if content.strip():
                 all_scraped_content.append(content)
@@ -628,23 +599,23 @@ class SearchWorker(QThread):
         """Performs a search and returns content, count, quality, and a list of source dicts."""
         try:
             search_q = f"{query} site:{domain}" if domain else query
-            self.log_message.emit(f"Searching: '{search_q}'")
+            self.log_message.emit(f"Searching with DDGS: '{search_q}'", "INFO")
             
             with DDGS() as ddgs:
                 search_results = [r for r in ddgs.text(search_q, max_results=self.SCRAPE_TOP_N_RESULTS)]
             
             if not search_results:
-                self.log_message.emit(f"No results found for: '{search_q}'")
+                self.log_message.emit(f"No results found for: '{search_q}'", "WARN")
                 return "", 0, "none", []
 
             ranked_urls = self.rank_urls_by_quality(search_results, query.lower())
             
             if not ranked_urls:
-                self.log_message.emit("No quality URLs found after ranking")
+                self.log_message.emit("No quality URLs found after ranking", "WARN")
                 return "", 0, "poor", []
 
             urls_to_scrape = ranked_urls[:self.MAX_SOURCES_TO_SCRAPE]
-            self.log_message.emit(f"[Search] Selected {len(urls_to_scrape)} top sources from {len(ranked_urls)} candidates.")
+            self.log_message.emit(f"Selected {len(urls_to_scrape)} top sources from {len(ranked_urls)} candidates.", "INFO")
 
             scraped_results_content = []
             scraped_sources_list = []
@@ -660,149 +631,89 @@ class SearchWorker(QThread):
                     scraped_sources_list.append(source_info) 
                     success_count += 1
                     total_content_length += content_length
-                    self.log_message.emit(f"[Scraper] Extracted: {url} ({content_length} chars, rank score: {score:.1f})")
+                    self.log_message.emit(f"Extracted: {url} ({content_length} chars, rank score: {score:.1f})", "INFO")
                 else:
-                    self.log_message.emit(f"[Scraper] Poor extraction: {url} (content too short or failed).")
+                    self.log_message.emit(f"Poor extraction: {url} (content too short or failed).", "WARN")
             
-            if success_count >= 2 and total_content_length > 1000:
-                quality = "excellent"
-            elif success_count >= 1 and total_content_length > 600:
-                quality = "good"
-            elif success_count >= 1 and total_content_length > 300:
-                quality = "fair"
-            else:
-                quality = "poor"
-            
-            self.log_message.emit(f"[Search] Quality: {quality} ({total_content_length} chars from {success_count}/{len(urls_to_scrape)} sources).")
+            quality = "poor"
+            if success_count >= 2 and total_content_length > 1000: quality = "excellent"
+            elif success_count >= 1 and total_content_length > 600: quality = "good"
+            elif success_count >= 1 and total_content_length > 300: quality = "fair"
+
+            self.log_message.emit(f"Search Quality: {quality} ({total_content_length} chars from {success_count}/{len(urls_to_scrape)} sources).", "INFO")
             return "\n".join(scraped_results_content), success_count, quality, scraped_sources_list
             
         except Exception as e:
-            self.log_message.emit(f"Search failed for '{query}': {e}")
+            self.log_message.emit(f"Search failed for '{query}': {e}", "ERROR")
             return f"<e>Search failed: {e}</e>", 0, "error", []
 
     def rank_urls_by_quality(self, search_results: List[Dict], query: str) -> List[Tuple[str, float]]:
         """CRITICAL: Intelligent URL ranking for different query types"""
-        
-        financial_domains = [
-            'finance.yahoo.com', 'marketwatch.com', 'bloomberg.com', 'reuters.com',
-            'cnbc.com', 'wsj.com', 'investing.com', 'morningstar.com'
-        ]
-        news_domains = [
-            'reuters.com', 'apnews.com', 'bbc.com', 'cnn.com', 'npr.org',
-            'bloomberg.com', 'wsj.com', 'cnbc.com'
-        ]
-        tech_domains = [
-            'techcrunch.com', 'arstechnica.com', 'theverge.com', 'wired.com',
-            'engadget.com', 'zdnet.com'
-        ]
-        weather_domains = [
-            'weather.com', 'accuweather.com', 'weather.gov', 'wunderground.com'
-        ]
+        financial_domains = ['finance.yahoo.com', 'marketwatch.com', 'bloomberg.com', 'reuters.com', 'cnbc.com', 'wsj.com', 'investing.com', 'morningstar.com']
+        news_domains = ['reuters.com', 'apnews.com', 'bbc.com', 'cnn.com', 'npr.org', 'bloomberg.com', 'wsj.com', 'cnbc.com']
+        tech_domains = ['techcrunch.com', 'arstechnica.com', 'theverge.com', 'wired.com', 'engadget.com', 'zdnet.com']
+        weather_domains = ['weather.com', 'accuweather.com', 'weather.gov', 'wunderground.com']
         
         query_lower = query.lower()
         priority_domains = []
         
-        if any(word in query_lower for word in ['stock', 'market', 'trading', 'nasdaq', 'dow', 'price', 'shares']):
-            priority_domains = financial_domains
-        elif any(word in query_lower for word in ['news', 'breaking', 'latest', 'today', 'current']):
-            priority_domains = news_domains  
-        elif any(word in query_lower for word in ['tech', 'technology', 'software', 'ai', 'computer']):
-            priority_domains = tech_domains
-        elif any(word in query_lower for word in ['weather', 'forecast', 'temperature', 'rain', 'snow']):
-            priority_domains = weather_domains
+        if any(word in query_lower for word in ['stock', 'market', 'trading', 'nasdaq', 'dow', 'price', 'shares']): priority_domains = financial_domains
+        elif any(word in query_lower for word in ['news', 'breaking', 'latest', 'today', 'current']): priority_domains = news_domains  
+        elif any(word in query_lower for word in ['tech', 'technology', 'software', 'ai', 'computer']): priority_domains = tech_domains
+        elif any(word in query_lower for word in ['weather', 'forecast', 'temperature', 'rain', 'snow']): priority_domains = weather_domains
         
         ranked_urls = []
-        
         for result in search_results:
-            url = result['href']
-            title = result.get('title', '').lower()
-            snippet = result.get('body', '').lower()
-            
-            try:
-                domain = url.split('/')[2].lower()
-            except (IndexError, AttributeError):
-                continue
+            url, title, snippet = result.get('href'), result.get('title', '').lower(), result.get('body', '').lower()
+            if not url: continue
+            try: domain = url.split('/')[2].lower()
+            except (IndexError, AttributeError): continue
             
             score = 1.0
+            if any(pd in domain for pd in priority_domains): score += 10.0
+            if any(word in title + snippet for word in ['today', 'latest', 'current', '2025', 'live']): score += 3.0
             
-            if any(pd in domain for pd in priority_domains):
-                score += 10.0
-            
-            if any(word in title + snippet for word in ['today', 'latest', 'current', '2025', 'live']):
-                score += 3.0
-            
-            query_words = query_lower.split()
-            title_matches = sum(1 for word in query_words if word in title)
+            title_matches = sum(1 for word in query_lower.split() if word in title)
             score += title_matches * 2.0
             
-            low_quality = ['pinterest.com', 'quora.com', 'answers.com', 'wikihow.com', 'ehow.com']
-            if any(lq in domain for lq in low_quality):
-                score -= 5.0
-            
-            if url.startswith('https://'):
-                score += 0.5
-                
+            if any(lq in domain for lq in ['pinterest.com', 'quora.com', 'answers.com', 'wikihow.com', 'ehow.com']): score -= 5.0
+            if url.startswith('https://'): score += 0.5
             ranked_urls.append((url, score))
         
         ranked_urls.sort(key=lambda x: x[1], reverse=True)
-        
         return ranked_urls
 
     def scrape_with_enhanced_extraction(self, url: str) -> Tuple[str, bool, int, Dict]:
         """Improved scraping that returns structured source info."""
-        self.log_message.emit(f"Scraping: {url}")
-        
+        self.log_message.emit(f"Scraping: {url}", "INFO")
         try:
             response = requests.get(url, headers=self.HEADERS, timeout=10)
             response.raise_for_status()
             html_content = response.text
         except requests.RequestException as e:
-            self.log_message.emit(f"Download failed for {url}: {e}")
+            self.log_message.emit(f"Download failed for {url}: {e}", "ERROR")
             return f"<result url='{url}' error='Failed to download'></result>", False, 0, {}
 
         metadata = trafilatura.extract_metadata(html_content)
         title = metadata.title if metadata and metadata.title else "Unknown Title"
         date = metadata.date if metadata and metadata.date else "N/A"
         
-        main_content = trafilatura.extract(
-            html_content, 
-            include_comments=False, 
-            include_tables=True,
-            favor_precision=True
-        )
+        main_content = trafilatura.extract(html_content, include_comments=False, include_tables=True, favor_precision=True)
 
-        if main_content and len(main_content) > 200:
-            content_to_use = main_content
-        else:
+        if not (main_content and len(main_content) > 200):
             soup = BeautifulSoup(html_content, 'html.parser')
-            for script in soup(["script", "style", "nav", "footer", "header"]):
-                script.decompose()
-            text = soup.get_text(separator=' ', strip=True)
-            text = re.sub(r'\s+', ' ', text).strip()
-            
-            if text and len(text) > 200:
-                content_to_use = text
-            else:
-                return f"<result url='{url}' title='{title}' date='{date}' error='Insufficient content'></result>", False, 0, {}
+            for script in soup(["script", "style", "nav", "footer", "header"]): script.decompose()
+            text = re.sub(r'\s+', ' ', soup.get_text(separator=' ', strip=True)).strip()
+            if text and len(text) > 200: main_content = text
+            else: return f"<result url='{url}' title='{title}' date='{date}' error='Insufficient content'></result>", False, 0, {}
 
-        content_length = len(content_to_use)
+        content_length = len(main_content)
+        if content_length < 300: return f"<result url='{url}' title='{title}' date='{date}' error='Content below quality threshold'></result>", False, 0, {}
+        if content_length > 8000: main_content = main_content[:8000] + "..."
         
-        if content_length < 300:
-            return f"<result url='{url}' title='{title}' date='{date}' error='Content below quality threshold'></result>", False, 0, {}
-        
-        if content_length > 8000:
-            content_to_use = content_to_use[:8000] + "..."
-        
-        formatted_string = f"""<result url="{url}" date="{date}">
-        <title>{title}</title>
-        <content>
-        {content_to_use}
-        </content>
-        </result>"""
-        
+        formatted_string = f"""<result url="{url}" date="{date}"><title>{title}</title><content>{main_content}</content></result>"""
         source_info = {'url': url, 'title': title, 'date': date}
-        
-        return formatted_string, True, len(content_to_use), source_info
+        return formatted_string, True, len(main_content), source_info
 
     def extract_search_requests(self, text: str) -> List[Tuple[str, str]]:
         """Extract search requests with improved validation"""
@@ -811,20 +722,10 @@ class SearchWorker(QThread):
         
         valid_requests = []
         for query, domain in matches:
-            query = query.strip()
-            domain = domain.strip() if domain else None
-            
-            if len(query) < 3:
-                continue
-                
-            if any(existing_query.lower() == query.lower() for existing_query, _ in valid_requests):
-                continue
-                
+            query, domain = query.strip(), domain.strip() if domain else None
+            if len(query) < 3 or any(existing_query.lower() == query.lower() for existing_query, _ in valid_requests): continue
             valid_requests.append((query, domain))
-            
-            if len(valid_requests) >= 1:
-                break
-                
+            if len(valid_requests) >= 1: break
         return valid_requests
 
     def extract_additional_search(self, text: str) -> str:
@@ -833,91 +734,67 @@ class SearchWorker(QThread):
         match = re.search(pattern, text.strip(), re.DOTALL | re.IGNORECASE)
         if match:
             query = match.group(1).strip()
-            if text.strip() == match.group(0).strip() and len(query) > 3:
-                return query
+            if text.strip() == match.group(0).strip() and len(query) > 3: return query
         return ""
 
     def validate_scraped_content(self, user_query: str, scraped_content: str) -> str:
         """Validator agent to check content relevance"""
-        self.log_message.emit("Running validator agent on scraped content...")
-        
-        validation_prompt = f"""USER QUERY: {user_query}
-
-        SCRAPED CONTENT TO VALIDATE:
-        {scraped_content}
-        """
+        self.log_message.emit("Running ValidatorAgent on scraped content...", "AGENT_CALL")
+        validation_prompt = f"USER QUERY: {user_query}\n\nSCRAPED CONTENT TO VALIDATE:\n{scraped_content}"
         try:
             validator_messages = self.validator_messages + [{'role': 'user', 'content': validation_prompt}]
             response = ollama.chat(model='qwen3:8b', messages=validator_messages, stream=False)
             validator_output = response['message']['content'].strip()
             
-            if '<pass>' in validator_output.lower():
-                return "pass"
+            if '<pass>' in validator_output.lower(): return "pass"
             elif '<fail>' in validator_output.lower():
                 fail_match = re.search(r'<fail>(.*?)</fail>', validator_output, re.IGNORECASE | re.DOTALL)
                 return fail_match.group(1).strip() if fail_match else "Content failed validation"
             else:
-                self.log_message.emit("Validator response was ambiguous. Defaulting to pass.")
+                self.log_message.emit("Validator response was ambiguous. Defaulting to pass.", "WARN")
                 return "pass"
-                
         except Exception as e:
-            self.log_message.emit(f"Validator agent failed: {e}. Defaulting to pass.")
+            self.log_message.emit(f"Validator agent failed: {e}. Defaulting to pass.", "ERROR")
             return "pass"
 
     def get_ollama_response(self, messages: list) -> str:
         """Get response from the main Ollama model using a list of messages."""
         model_name = 'qwen3:14b'
         
-        log_parts = ["\n" + "--- PAYLOAD BEING SENT TO MODEL ---"]
         system_prompt = messages[0]['content']
         history_messages = messages[1:-1]
         final_task = messages[-1]['content']
 
-        log_parts.append("\n[SYSTEM PROMPT]:")
-        log_parts.append(f'"{system_prompt[:150].strip().replace(chr(10), " ")}..."')
-
-        log_parts.append("\n[SEMANTIC HISTORY RETRIEVED]:")
+        log_payload = "--- PAYLOAD BEING SENT TO MODEL ---\n"
+        log_payload += f"\n[SYSTEM PROMPT]:\n\"{system_prompt[:250].strip().replace(chr(10), ' ')}...\"\n"
+        log_payload += "\n[SEMANTIC HISTORY RETRIEVED]:\n"
         if history_messages:
             for msg in history_messages:
                 role = msg.get('role', 'N/A').upper()
                 content = msg.get('content', '').strip().replace('\n', '\\n')
-                if len(content) > 120:
-                    content = content[:120] + "..."
-                log_parts.append(f"  - [{role}]: {content}")
+                log_payload += f"  - [{role}]: {content[:120] + '...' if len(content) > 120 else content}\n"
         else:
-            log_parts.append("  (None)")
-
-        log_parts.append("\n[CURRENT USER TASK]:")
-        log_parts.append(f'"{final_task.strip().replace(chr(10), " ")}"')
+            log_payload += "  (None)\n"
+        log_payload += "\n[CURRENT USER TASK]:\n"
+        log_payload += f"\"{final_task.strip().replace(chr(10), ' ')}\"\n"
+        log_payload += "--- END OF PAYLOAD ---\n"
+        self.log_message.emit(log_payload, "PAYLOAD")
         
-        log_parts.append("\n" + "--- END OF PAYLOAD ---" + "\n")
-        self.log_message.emit("\n".join(log_parts))
-
-        self.log_message.emit(f"Requesting response from {model_name} with {len(messages)} messages in context...")
+        self.log_message.emit(f"Requesting response from {model_name} with {len(messages)} messages in context...", "INFO")
         try:
             response = ollama.chat(model=model_name, messages=messages, stream=False)
-            self.log_message.emit(f"[Ollama] {model_name} response received.")
+            self.log_message.emit(f"{model_name} response received.", "INFO")
             return response['message']['content']
         except Exception as e:
-            self.log_message.emit(f"[Ollama] {model_name} request failed: {e}")
+            self.log_message.emit(f"{model_name} request failed: {e}", "ERROR")
             raise
 
     def _attach_sources_to_response(self, response_text: str, sources: List[Dict]) -> str:
-        """
-        Deterministically attaches a <sources> block to the response using the
-        ground-truth list of sources, removing any model-generated block.
-        """
-        if not sources:
-            return response_text
-
+        """Deterministically attaches a <sources> block to the response."""
+        if not sources: return response_text
         clean_response = re.sub(r'<sources>.*?</sources>', '', response_text, flags=re.DOTALL).strip()
-
-        sources_lines = []
-        for source in sources:
-            sources_lines.append(f'<source url="{source["url"]}" date="{source["date"]}">{source["title"]}</source>')
-        
+        sources_lines = [f'<source url="{s["url"]}" date="{s["date"]}">{s["title"]}</source>' for s in sources]
         sources_block = "<sources>\n" + "\n".join(sources_lines) + "\n</sources>"
-
         return f"{clean_response}\n\n{sources_block}"
 
 class CustomTitleBar(QWidget):
@@ -1030,38 +907,29 @@ class MessageBubble(QWidget):
 
     def toggle_citations(self):
         self.is_citations_expanded = not self.is_citations_expanded
-        try:
-            self.citations_animation.finished.disconnect()
-        except (RuntimeError, TypeError):
-            pass
-
+        try: self.citations_animation.finished.disconnect()
+        except (RuntimeError, TypeError): pass
         if self.is_citations_expanded:
             self.citations_container.setVisible(True)
             self.citations_container.setMaximumHeight(16777215)
-            target_height = self.citations_container.sizeHint().height()
             self.citations_animation.setStartValue(0)
-            self.citations_animation.setEndValue(target_height)
+            self.citations_animation.setEndValue(self.citations_container.sizeHint().height())
         else:
-            current_height = self.citations_container.height()
-            self.citations_animation.setStartValue(current_height)
+            self.citations_animation.setStartValue(self.citations_container.height())
             self.citations_animation.setEndValue(0)
             self.citations_animation.finished.connect(lambda: self.citations_container.setVisible(False))
         self.citations_animation.start()
 
     def toggle_thinking(self):
         self.is_thinking_expanded = not self.is_thinking_expanded
-        try:
-            self.thinking_animation.finished.disconnect()
-        except (RuntimeError, TypeError):
-            pass
-
+        try: self.thinking_animation.finished.disconnect()
+        except (RuntimeError, TypeError): pass
         if self.is_thinking_expanded:
             self.toggle_thinking_button.setText("Hide")
             self.thinking_container.setVisible(True)
             self.thinking_container.setMaximumHeight(16777215)
-            target_height = self.thinking_container.sizeHint().height()
             self.thinking_animation.setStartValue(0)
-            self.thinking_animation.setEndValue(target_height)
+            self.thinking_animation.setEndValue(self.thinking_container.sizeHint().height())
         else:
             self.toggle_thinking_button.setText("Thinking Process")
             self.thinking_animation.setStartValue(self.thinking_container.height())
@@ -1072,7 +940,9 @@ class MessageBubble(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.memory = SemanticMemory(log_callback=lambda msg: self.update_log(msg))
+        # MODIFICATION: The log callback now expects two arguments, so we use a lambda
+        # to adapt the call from SemanticMemory which only provides one.
+        self.memory = SemanticMemory(log_callback=lambda msg, level="MEMORY": self.update_log(msg, level))
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.init_ui()
@@ -1184,67 +1054,45 @@ class MainWindow(QMainWindow):
             QSplitter::handle { background-color: #2D2D2D; width: 3px; } QSplitter::handle:hover { background-color: #007ACC; }
             #panelTitle { color: #4EC9B0; font-size: 13px; font-weight: bold; margin-bottom: 5px; padding-left: 2px; }
             #chatScrollArea { border: none; background: transparent; }
-            #logDisplay { border: 1px solid #333333; border-radius: 4px; background-color: #252526; color: #888888; font-family: Consolas, Courier New, monospace; font-size: 12px; }
+            #logDisplay { border: 1px solid #333333; border-radius: 4px; background-color: #252526; color: #D4D4D4; font-family: Consolas, Courier New, monospace; font-size: 12px; }
             QFrame#messageBubbleContainer { background-color: #2D2D2D; border: 1px solid #3C3C3C; border-radius: 8px; max-width: 650px; }
             QFrame#messageBubbleContainer[isUser="true"] { background-color: #004C8A; border-color: #007ACC; }
             QLabel#messageText { background-color: transparent; border: none; padding: 0; color: #D4D4D4; font-size: 14px; }
             
-            #toggleDetailButton { 
-                background-color: #3C3C3C; color: #CCCCCC; border: none; border-radius: 6px; 
-                font-size: 12px; padding: 6px 12px; margin-top: 8px; font-weight: 500;
-            }
+            #toggleDetailButton { background-color: #3C3C3C; color: #CCCCCC; border: none; border-radius: 6px; font-size: 12px; padding: 6px 12px; margin-top: 8px; font-weight: 500; }
             #toggleDetailButton:hover { background-color: #4A4A4A; color: #E0E0E0; } 
             #toggleDetailButton:checked { background-color: #555555; color: white; }
-
-            #thinkingContainer, #citationsContainer { 
-                background-color: #252526; border: 1px solid #3C3C3C; border-radius: 6px; 
-                margin-top: 4px;
-            }
-            #thinkingLabel {
-                font-family: Consolas, 'Courier New', monospace; font-size: 12px;
-                color: #B3B3B3; background-color: transparent; padding: 8px;
-            }
-            #citationLabel { 
-                font-size: 12px; padding: 4px 6px; line-height: 1.4;
-                background-color: transparent; border: none;
-            } 
+            #thinkingContainer, #citationsContainer { background-color: #252526; border: 1px solid #3C3C3C; border-radius: 6px; margin-top: 4px; }
+            #thinkingLabel { font-family: Consolas, 'Courier New', monospace; font-size: 12px; color: #B3B3B3; background-color: transparent; padding: 8px; }
+            #citationLabel { font-size: 12px; padding: 4px 6px; line-height: 1.4; background-color: transparent; border: none; } 
             #citationLabel a { color: #4EC9B0; text-decoration: none; } 
             #citationLabel a:hover { text-decoration: underline; color: #6BD4BC; }
             #footerFrame { background-color: #2D2D2D; border-top: 1px solid #3C3C3C; }
             #inputField { background-color: #3C3C3C; border: 1px solid #555555; border-radius: 4px; padding: 8px; color: #F1F1F1; font-size: 14px; }
             #inputField:focus { border: 1px solid #007ACC; }
-            #sendButton { 
-                background-color: #007ACC; color: white; border: none; border-radius: 25px; font-size: 20px; 
-            }
+            #sendButton { background-color: #007ACC; color: white; border: none; border-radius: 25px; font-size: 20px; }
             #sendButton:hover { background-color: #1F9CFD; } 
             #sendButton:disabled { background-color: #4A4A4A; }
-            
-            #forceSearchButton {
-                background-color: #3C3C3C;
-                color: #888;
-                border: 1px solid #555;
-                border-radius: 25px;
-                font-size: 20px;
-            }
-            #forceSearchButton:hover {
-                background-color: #4A4A4A;
-            }
-            #forceSearchButton:checked {
-                background-color: #2a5c3d;
-                color: #90ee90;
-                border: 1px solid #4EC9B0;
-            }
-            #forceSearchButton:disabled {
-                background-color: #252526;
-                color: #666;
-            }
-            
+            #forceSearchButton { background-color: #3C3C3C; color: #888; border: 1px solid #555; border-radius: 25px; font-size: 20px; }
+            #forceSearchButton:hover { background-color: #4A4A4A; }
+            #forceSearchButton:checked { background-color: #2a5c3d; color: #90ee90; border: 1px solid #4EC9B0; }
+            #forceSearchButton:disabled { background-color: #252526; color: #666; }
             #statusLabel { color: #888888; font-size: 12px; }
             #clearButton { background-color: #3C3C3C; color: #CCCCCC; border: 1px solid #555; padding: 4px 10px; border-radius: 4px; font-size: 12px; }
             #clearButton:hover { background-color: #4A4A4A; color: white; border-color: #666; }
-            QScrollBar:vertical { background: transparent; width: 10px; margin: 0; }
+
+            /* --- SCROLLBAR STYLING FIX --- */
+            QScrollBar:vertical { border: none; background: #252526; width: 10px; margin: 0; }
             QScrollBar::handle:vertical { background: #4A4A4A; border-radius: 5px; min-height: 25px; } 
-            QScrollBar::handle:vertical:hover { background-color: #6A6A6A; }
+            QScrollBar::handle:vertical:hover { background: #6A6A6A; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
+
+            QScrollBar:horizontal { border: none; background: #252526; height: 10px; margin: 0; }
+            QScrollBar::handle:horizontal { background: #4A4A4A; border-radius: 5px; min-width: 25px; }
+            QScrollBar::handle:horizontal:hover { background: #6A6A6A; }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
         """
 
     def clear_chat_session(self):
@@ -1256,32 +1104,30 @@ class MainWindow(QMainWindow):
             if item.widget():
                 item.widget().deleteLater()
         
-        self.log_display.append(f"\n{datetime.now().strftime('%H:%M:%S')} - --- New Chat Session Started ---\n")
+        self.update_log("--- New Chat Session Started ---", "STEP")
         self.status_label.setText("Ready")
         self.input_field.setFocus()
 
     def send_message(self):
         """Handles the main send action, checking the state of the force search toggle."""
         text = self.input_field.toPlainText().strip()
-        if not text:
-            return
+        if not text: return
             
         self.add_message_to_ui(text, is_user=True)
-        
         self.input_field.clear()
         self.set_ui_enabled(False)
-        
         is_force_search_enabled = self.force_search_toggle.isChecked()
         
-        self.log_display.append(f"{datetime.now().strftime('%H:%M:%S')} - USER QUERY: {text}")
+        self.update_log(f"USER QUERY: {text}", "USER")
         if is_force_search_enabled:
-            self.log_display.append(f"{datetime.now().strftime('%H:%M:%S')} - MODE: Force Search Enabled")
+            self.update_log("MODE: Force Search Enabled", "INFO")
 
         self.worker = SearchWorker(text, self.memory, force_search=is_force_search_enabled)
+        # MODIFICATION: The signal now passes two args, which matches update_log perfectly
+        self.worker.log_message.connect(self.update_log)
         self.worker.finished.connect(lambda response: self.handle_response(response, original_prompt=text))
         self.worker.error.connect(lambda error: self.handle_error(error, original_prompt=text))
         self.worker.progress.connect(self.update_status)
-        self.worker.log_message.connect(self.update_log)
         self.worker.start()
 
     def add_message_to_ui(self, text: str, is_user: bool):
@@ -1315,55 +1161,81 @@ class MainWindow(QMainWindow):
         bubble = MessageBubble(main_text if not is_user else text, citations=citations, thinking_text=thinking_text)
         bubble.container.setProperty("isUser", is_user)
 
-        if not is_user:
-            bubble.container.setMinimumWidth(650)
-            bubble.container.setMaximumWidth(650)
+        if not is_user: bubble.container.setMinimumWidth(650); bubble.container.setMaximumWidth(650)
         
         row_container = QWidget()
         row_layout = QHBoxLayout(row_container)
         row_layout.setContentsMargins(5, 5, 5, 5)
         row_layout.setSpacing(0)
         
-        if is_user:
-            row_layout.addStretch()
-            row_layout.addWidget(bubble, 0, Qt.AlignTop)
-        else:
-            row_layout.addWidget(bubble, 0, Qt.AlignTop)
-            row_layout.addStretch()
+        if is_user: row_layout.addStretch(); row_layout.addWidget(bubble, 0, Qt.AlignTop)
+        else: row_layout.addWidget(bubble, 0, Qt.AlignTop); row_layout.addStretch()
         
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, row_container)
         
-        from PySide6.QtCore import QTimer
         QTimer.singleShot(50, lambda: self.chat_scroll.verticalScrollBar().setValue(
             self.chat_scroll.verticalScrollBar().maximum()))
 
     def handle_response(self, response: str, original_prompt: str):
         """Handles a successful response from the worker."""
         self.add_message_to_ui(response, is_user=False)
-        
         self.memory.add_message(role='user', content=original_prompt)
         self.memory.add_message(role='assistant', content=response)
-        
         self.set_ui_enabled(True)
-        self.log_display.append(f"{datetime.now().strftime('%H:%M:%S')} - RESPONSE DELIVERED")
+        self.update_log("Response delivered to UI.", "INFO")
 
     def handle_error(self, error: str, original_prompt: str):
         """Handles an error from the worker."""
         error_msg = f"Error: {error}"
         self.add_message_to_ui(error_msg, is_user=False)
-        
         self.memory.add_message(role='user', content=original_prompt)
         self.memory.add_message(role='assistant', content=error_msg)
-        
         self.set_ui_enabled(True)
-        self.log_display.append(f"{datetime.now().strftime('%H:%M:%S')} - ERROR: {error}")
+        self.update_log(f"Error handled: {error}", "ERROR")
 
     def update_status(self, status: str):
         self.status_label.setText(status)
 
-    def update_log(self, message: str):
+    # =========================================================================================
+    # === MODIFIED update_log() METHOD ========================================================
+    # =========================================================================================
+    def update_log(self, message: str, level: str = "INFO"):
+        """Appends a styled, color-coded message to the log display based on its level."""
+        
+        LOG_LEVEL_STYLES = {
+            "INFO":       "color: #97A3B6;", # Light blue/gray for general info
+            "STEP":       "color: #4EC9B0; font-weight: bold;", # Bright teal for major steps
+            "WARN":       "color: #DDB45D;", # Yellow for warnings
+            "ERROR":      "color: #F47067; font-weight: bold;", # Red for errors
+            "AGENT_CALL": "color: #C586C0; font-style: italic;", # Purple for agent calls
+            "MEMORY":     "color: #6A9955;", # Green for memory operations
+            "USER":       "color: #007ACC; font-weight: bold;", # Blue for user actions
+            "PAYLOAD":    "color: #666666; border-left: 2px solid #444; padding-left: 8px; margin-top: 4px; margin-bottom: 4px;" # Dark gray for data dumps
+        }
+        
+        style = LOG_LEVEL_STYLES.get(level, LOG_LEVEL_STYLES["INFO"])
         timestamp = datetime.now().strftime('%H:%M:%S')
-        self.log_display.append(f"{timestamp} - {message}")
+        
+        # Sanitize message for HTML
+        safe_message = message.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br>')
+        
+        # Use <pre> tag for payloads to preserve whitespace and formatting
+        if level == "PAYLOAD":
+            html_content = f"""
+            <div style="margin-bottom: 2px; {style}">
+                <span style="color:#777;">{timestamp} --- </span>
+                <pre style="display: inline; white-space: pre-wrap; margin: 0; font-family: Consolas, 'Courier New', monospace;">{safe_message}</pre>
+            </div>
+            """
+        else:
+            html_content = f"""
+            <div style="margin-bottom: 2px; {style}">
+                <span style="color:#777;">{timestamp} --- </span>
+                <span>{safe_message}</span>
+            </div>
+            """
+
+        self.log_display.insertHtml(html_content)
         
         scrollbar = self.log_display.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
@@ -1377,15 +1249,11 @@ class MainWindow(QMainWindow):
         if enabled:
             self.status_label.setText("Ready")
             self.input_field.setFocus()
-        else:
-            pass
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Return and not (event.modifiers() & Qt.ShiftModifier):
-            if self.send_button.isEnabled():
-                self.send_message()
-        else:
-            super().keyPressEvent(event)
+            if self.send_button.isEnabled(): self.send_message()
+        else: super().keyPressEvent(event)
 
 def main():
     app = QApplication(sys.argv)

@@ -87,10 +87,10 @@ Follow these instructions to get the AI assistant running on your local machine.
 
     ```bash
     # For the main orchestrator agent (synthesis and reasoning)
-    ollama pull qwen2:7b
+    ollama pull qwen3:14b
 
     # For the specialized support agents (planning and validation)
-    ollama pull qwen2:1.5b
+    ollama pull qwen3:8b
 
     # For generating vector embeddings for semantic memory
     ollama pull nomic-embed-text

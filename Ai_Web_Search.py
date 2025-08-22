@@ -236,7 +236,6 @@ The <domain> tag is OPTIONAL. Only use it when you have high confidence in a spe
 ADDITIONAL SEARCH FORMAT (Your entire response must be only this):
 <additional_search><query>your new, refined, and specific search query</query></additional_search>
 
-
 ## RESPONSE FORMATTING:
 - You MUST use Markdown for all formatting (e.g., **bold**, *italics*, bullet points with `*` or `-`).
 - This is not optional. Your final output to the user must be well-formatted Markdown.
@@ -273,7 +272,6 @@ class SearchWorker(QThread):
 
     def _get_search_plan(self, user_query: str) -> str:
         """Calls the Search Intent Agent to decompose the user query, now WITH conversational context."""
-        # MODIFICATION: Removed emoji for cleaner logs
         self.log_message.emit("\n" + "="*25 + "\n[IntentAgent] Calling with conversational context...\n" + "="*25)
         self.progress.emit("Decomposing query for targeted search...")
         try:
@@ -288,7 +286,6 @@ class SearchWorker(QThread):
                 else:
                     sanitized_history.append(msg)
             
-            # MODIFICATION: Removed emoji for cleaner logs
             self.log_message.emit(f"[IntentAgent] Providing {len(sanitized_history)} contextual messages.")
             
             system_message = {'role': 'system', 'content': SEARCH_INTENT_PROMPT}
@@ -298,11 +295,9 @@ class SearchWorker(QThread):
             
             response = ollama.chat(model='qwen3:8b', messages=messages, stream=False)
             plan = response['message']['content'].strip()
-            # MODIFICATION: Removed emoji for cleaner logs
             self.log_message.emit(f"[IntentAgent] Plan received:\n{plan}\n")
             return plan
         except Exception as e:
-            # MODIFICATION: Removed emoji for cleaner logs
             self.log_message.emit(f"[IntentAgent] Failed: {e}. Proceeding without plan.\n")
             return ""
 
@@ -310,8 +305,8 @@ class SearchWorker(QThread):
         try:
             self.log_message.emit("\n" + "─"*15 + " New Request Started " + "─"*15)
             
-            # MODIFICATION: Variable to track the raw source material used for synthesis.
-            source_material_for_synthesis = ""
+            # MODIFICATION: This list will hold the ground truth for all sources used.
+            sources_used_for_synthesis = []
             final_response = ""
 
             if self.force_search:
@@ -348,12 +343,11 @@ class SearchWorker(QThread):
                 search_requests = search_requests[:1]
 
             if search_requests:
-                # MODIFICATION: Removed emoji for cleaner logs
                 self.log_message.emit(f"[Search] Performing targeted search based on model analysis.")
-                scraped_content = self.execute_search_plan(search_requests)
+                # MODIFICATION: `execute_search_plan` now returns sources.
+                scraped_content, sources_from_search = self.execute_search_plan(search_requests)
 
                 if not scraped_content.strip():
-                    # MODIFICATION: Removed emoji for cleaner logs
                     self.log_message.emit("[Search] No usable content. Responding with available knowledge.")
                     prompt_for_no_search = "The web search failed to return any content. Please answer the user's last question using only your existing knowledge, without mentioning the failed search."
                     messages_for_fallback = messages_for_planning + [
@@ -366,43 +360,33 @@ class SearchWorker(QThread):
                     validation_result = self.validate_scraped_content(self.prompt, scraped_content)
                     
                     if validation_result == "pass":
-                        # MODIFICATION: Removed emoji for cleaner logs
                         self.log_message.emit("[Validator] Content passed relevance check.")
                         self.progress.emit("Synthesizing validated response...")
                         
-                        # MODIFICATION: This content is being used for synthesis.
-                        source_material_for_synthesis = scraped_content
+                        # MODIFICATION: Add the verified sources to our ground-truth list.
+                        sources_used_for_synthesis.extend(sources_from_search)
 
                         synthesis_prompt = f"""<think>
-The initial search was successful and the validator confirmed the content is relevant. Now I will synthesize this information into a clear, concise answer for the user, making sure to include citations from the provided content.
-</think>
+                        The initial search was successful and the validator confirmed the content is relevant. Now I will synthesize this information into a clear, concise answer for the user, making sure to include citations from the provided content.
+                        </think>
 
-VALIDATED SEARCH RESULTS:
-{scraped_content}
+                        VALIDATED SEARCH RESULTS:
+                        {scraped_content}
 
-Instructions: Based on the provided search results, please give a comprehensive answer to the user's last question. 
-
-
-## VITAL!!! - SOURCE FORMAT REQUIRED:
-<sources>
-<source url="actual-scraped-url" date="extracted-date">Clean Title from Results</source>
-</sources> (I MUST ALWAYS INCLUDE THIS AT THE END OF EACH MESSAGE THE CONTAINS WEB DATA)
-
-"""
-                        
+                        Instructions: Based on the provided search results, please give a comprehensive answer to the user's last question. 
+                        """
                         messages_for_synthesis = messages_for_planning + [
                             {'role': 'assistant', 'content': initial_model_response},
                             {'role': 'user', 'content': synthesis_prompt}
                         ]
                         synthesis_response_1 = self.get_ollama_response(messages=messages_for_synthesis)
 
-                        # --- NEW: ADDITIONAL SEARCH LOGIC ---
                         additional_query = self.extract_additional_search(synthesis_response_1)
                         if additional_query:
                             self.log_message.emit(f"[Model] Requested additional search for: '{additional_query}'")
                             self.progress.emit("Performing additional search requested by model...")
                             
-                            additional_scraped_content = self.execute_search_plan([(additional_query, None)])
+                            additional_scraped_content, sources_from_add_search = self.execute_search_plan([(additional_query, None)])
 
                             if additional_scraped_content and additional_scraped_content.strip():
                                 self.progress.emit("Validating additional search results...")
@@ -412,8 +396,8 @@ Instructions: Based on the provided search results, please give a comprehensive 
                                     self.log_message.emit("[Validator] Additional search content passed.")
                                     self.progress.emit("Synthesizing final response with all data...")
                                     
-                                    # MODIFICATION: Both initial and additional content are used.
-                                    source_material_for_synthesis += "\n\n" + additional_scraped_content
+                                    # MODIFICATION: Add the new sources to our ground-truth list.
+                                    sources_used_for_synthesis.extend(sources_from_add_search)
 
                                     final_synthesis_prompt = f"""<think>
                                     My first search provided some information, but I determined it was insufficient and requested an additional search for '{additional_query}'. That search was successful. Now I have the results from both searches and will combine them into a single, comprehensive final answer.
@@ -425,10 +409,10 @@ Instructions: Based on the provided search results, please give a comprehensive 
                                     ADDITIONAL SEARCH RESULTS:
                                     {additional_scraped_content}
 
-                                    Instructions: Based on the combined information from BOTH sets of search results, please give a final, comprehensive answer to the user's last question.
+                                    Instructions: Based on the combined information from BOTH sets of search results, please give a final, comprehensive answer to the user's last question. It is critical to synthesize information from both contexts 
                                     """
                                     messages_for_final_synthesis = messages_for_synthesis + [
-                                        {'role': 'assistant', 'content': synthesis_response_1}, # This is the <additional_search> tag
+                                        {'role': 'assistant', 'content': synthesis_response_1},
                                         {'role': 'user', 'content': final_synthesis_prompt}
                                     ]
                                     final_response = self.get_ollama_response(messages=messages_for_final_synthesis)
@@ -450,20 +434,16 @@ Instructions: Based on the provided search results, please give a comprehensive 
                                 Instructions: Your additional search failed to find anything. Answer the user's question using ONLY the initial search results provided above."""
                                 messages_for_fallback = messages_for_synthesis + [{'role': 'assistant', 'content': synthesis_response_1}, {'role': 'user', 'content': fallback_prompt}]
                                 final_response = self.get_ollama_response(messages=messages_for_fallback)
-
                         else:
-                            # No additional search was requested.
                             final_response = synthesis_response_1
-                        # --- END: ADDITIONAL SEARCH LOGIC ---
                     else:
-                        # MODIFICATION: Removed emoji for cleaner logs
                         self.log_message.emit(f"[Validator] Content failed: {validation_result}")
                         self.progress.emit("Content failed validation, attempting refined search...")
                         
-                        refined_content = self.retry_search_with_refinement(search_requests[0])
+                        refined_content, sources_from_refined = self.retry_search_with_refinement(search_requests[0])
                         if refined_content:
-                            # MODIFICATION: Refined content is being used.
-                            source_material_for_synthesis = refined_content
+                            # MODIFICATION: Add the refined sources to our ground-truth list.
+                            sources_used_for_synthesis.extend(sources_from_refined)
                             refined_synthesis_prompt = f"""<think>
                             The first search failed validation. I have conducted a refined search which yielded better results. I will now synthesize this new content into the final answer.
                             </think>
@@ -471,14 +451,13 @@ Instructions: Based on the provided search results, please give a comprehensive 
                             REFINED SEARCH RESULTS:
                             {refined_content}
 
-                            Instructions: Based on these new search results, please give a comprehensive answer to the user's last question."""
+                            Instructions: Based on these new search results, please give a comprehensive answer to the user's last question. Include proper source citations."""
                             messages_for_refined_synthesis = messages_for_planning + [
                                 {'role': 'assistant', 'content': initial_model_response},
                                 {'role': 'user', 'content': refined_synthesis_prompt}
                             ]
                             final_response = self.get_ollama_response(messages=messages_for_refined_synthesis)
                         else:
-                            # MODIFICATION: Removed emoji for cleaner logs
                             self.log_message.emit("[Search] Primary and refined searches failed validation.")
                             prompt_for_failed_search = "Both the primary and refined web searches failed to return useful content. Please inform the user that you couldn't find relevant information online and answer their last question using only your existing knowledge."
                             messages_for_final_fallback = messages_for_planning + [
@@ -491,8 +470,8 @@ Instructions: Based on the provided search results, please give a comprehensive 
                 self.log_message.emit("Model determined no search needed. Using existing knowledge.")
                 final_response = initial_model_response
 
-            # MODIFICATION: The final injection step, just before emitting the result.
-            final_response_with_sources = self._inject_sources(final_response, source_material_for_synthesis)
+            # MODIFICATION: The final, deterministic attachment step.
+            final_response_with_sources = self._attach_sources_to_response(final_response, sources_used_for_synthesis)
 
             self.log_message.emit("─"*17 + " Request Completed " + "─"*16 + "\n")
             self.finished.emit(final_response_with_sources)
@@ -503,31 +482,34 @@ Instructions: Based on the provided search results, please give a comprehensive 
             self.log_message.emit(f"ERROR: {error_str}")
             self.error.emit(str(e))
 
-    def execute_search_plan(self, search_requests: List[Tuple[str, str]]) -> str:
-        """Execute search plan with improved quality control"""
+    def execute_search_plan(self, search_requests: List[Tuple[str, str]]) -> Tuple[str, List[Dict]]:
+        """Execute search plan and return content string and a list of source dicts."""
         all_scraped_content = []
+        all_sources = []
         
         for query, domain in search_requests:
             self.progress.emit(f"Searching for '{query}'...")
             self.log_message.emit(f"Executing search: '{query}'" + (f" on '{domain}'" if domain else ""))
             
-            content, success_count, source_quality = self.perform_single_search_and_scrape(query, domain)
+            # MODIFICATION: Function now returns sources list.
+            content, success_count, source_quality, sources = self.perform_single_search_and_scrape(query, domain)
             
             if success_count == 0 and domain:
                 self.log_message.emit(f"Domain-specific search failed. Attempting broader search.")
                 self.progress.emit(f"Broadening search scope...")
-                content, success_count, source_quality = self.perform_single_search_and_scrape(query, domain=None)
+                content, success_count, source_quality, sources = self.perform_single_search_and_scrape(query, domain=None)
                 self.log_message.emit(f"Fallback completed: {success_count} sources, quality: {source_quality}")
             elif success_count > 0:
                 self.log_message.emit(f"Search successful: {success_count} sources, quality: {source_quality}")
             
             if content.strip():
                 all_scraped_content.append(content)
+                all_sources.extend(sources)
                 
-        return "\n\n".join(all_scraped_content)
+        return "\n\n".join(all_scraped_content), all_sources
 
-    def perform_single_search_and_scrape(self, query: str, domain: str = None) -> Tuple[str, int, str]:
-        """MASSIVELY IMPROVED search with smart filtering for real-time data"""
+    def perform_single_search_and_scrape(self, query: str, domain: str = None) -> Tuple[str, int, str, List[Dict]]:
+        """Performs a search and returns content, count, quality, and a list of source dicts."""
         try:
             search_q = f"{query} site:{domain}" if domain else query
             self.log_message.emit(f"Searching: '{search_q}'")
@@ -537,34 +519,34 @@ Instructions: Based on the provided search results, please give a comprehensive 
             
             if not search_results:
                 self.log_message.emit(f"No results found for: '{search_q}'")
-                return "", 0, "none"
+                return "", 0, "none", []
 
             ranked_urls = self.rank_urls_by_quality(search_results, query.lower())
             
             if not ranked_urls:
                 self.log_message.emit("No quality URLs found after ranking")
-                return "", 0, "poor"
+                return "", 0, "poor", []
 
             urls_to_scrape = ranked_urls[:self.MAX_SOURCES_TO_SCRAPE]
-            # MODIFICATION: Removed emoji for cleaner logs
             self.log_message.emit(f"[Search] Selected {len(urls_to_scrape)} top sources from {len(ranked_urls)} candidates.")
 
-            scraped_results = []
+            scraped_results_content = []
+            scraped_sources_list = []
             success_count = 0
             total_content_length = 0
             
             for i, (url, score) in enumerate(urls_to_scrape):
                 self.progress.emit(f"Extracting from source {i+1}/{len(urls_to_scrape)}...")
-                scraped_data, success, content_length = self.scrape_with_enhanced_extraction(url)
+                # MODIFICATION: Scraper now returns a source dictionary.
+                scraped_data, success, content_length, source_info = self.scrape_with_enhanced_extraction(url)
                 
                 if success and content_length > 200:
-                    scraped_results.append(scraped_data)
+                    scraped_results_content.append(scraped_data)
+                    scraped_sources_list.append(source_info) # Capture the ground truth.
                     success_count += 1
                     total_content_length += content_length
-                    # MODIFICATION: Removed emoji for cleaner logs
                     self.log_message.emit(f"[Scraper] Extracted: {url} ({content_length} chars, rank score: {score:.1f})")
                 else:
-                    # MODIFICATION: Removed emoji for cleaner logs
                     self.log_message.emit(f"[Scraper] Poor extraction: {url} (content too short or failed).")
             
             if success_count >= 2 and total_content_length > 1000:
@@ -576,13 +558,12 @@ Instructions: Based on the provided search results, please give a comprehensive 
             else:
                 quality = "poor"
             
-            # MODIFICATION: Removed emoji for cleaner logs
             self.log_message.emit(f"[Search] Quality: {quality} ({total_content_length} chars from {success_count}/{len(urls_to_scrape)} sources).")
-            return "\n".join(scraped_results), success_count, quality
+            return "\n".join(scraped_results_content), success_count, quality, scraped_sources_list
             
         except Exception as e:
             self.log_message.emit(f"Search failed for '{query}': {e}")
-            return f"<e>Search failed: {e}</e>", 0, "error"
+            return f"<e>Search failed: {e}</e>", 0, "error", []
 
     def rank_urls_by_quality(self, search_results: List[Dict], query: str) -> List[Tuple[str, float]]:
         """CRITICAL: Intelligent URL ranking for different query types"""
@@ -652,8 +633,8 @@ Instructions: Based on the provided search results, please give a comprehensive 
         
         return ranked_urls
 
-    def scrape_with_enhanced_extraction(self, url: str) -> Tuple[str, bool, int]:
-        """Improved scraping with content quality validation"""
+    def scrape_with_enhanced_extraction(self, url: str) -> Tuple[str, bool, int, Dict]:
+        """Improved scraping that returns structured source info."""
         self.log_message.emit(f"Scraping: {url}")
         
         try:
@@ -662,7 +643,7 @@ Instructions: Based on the provided search results, please give a comprehensive 
             html_content = response.text
         except requests.RequestException as e:
             self.log_message.emit(f"Download failed for {url}: {e}")
-            return f"<result url='{url}' error='Failed to download'></result>", False, 0
+            return f"<result url='{url}' error='Failed to download'></result>", False, 0, {}
 
         metadata = trafilatura.extract_metadata(html_content)
         title = metadata.title if metadata and metadata.title else "Unknown Title"
@@ -687,15 +668,15 @@ Instructions: Based on the provided search results, please give a comprehensive 
             if text and len(text) > 200:
                 content_to_use = text
             else:
-                return f"<result url='{url}' title='{title}' date='{date}' error='Insufficient content'></result>", False, 0
+                return f"<result url='{url}' title='{title}' date='{date}' error='Insufficient content'></result>", False, 0, {}
 
         content_length = len(content_to_use)
         
         if content_length < 300:
-            return f"<result url='{url}' title='{title}' date='{date}' error='Content below quality threshold'></result>", False, 0
+            return f"<result url='{url}' title='{title}' date='{date}' error='Content below quality threshold'></result>", False, 0, {}
         
-        if content_length > 6000:
-            content_to_use = content_to_use[:6000] + "..."
+        if content_length > 8000:
+            content_to_use = content_to_use[:8000] + "..."
         
         formatted_string = f"""<result url="{url}" date="{date}">
         <title>{title}</title>
@@ -704,7 +685,9 @@ Instructions: Based on the provided search results, please give a comprehensive 
         </content>
         </result>"""
         
-        return formatted_string, True, len(content_to_use)
+        source_info = {'url': url, 'title': title, 'date': date}
+        
+        return formatted_string, True, len(content_to_use), source_info
 
     def extract_search_requests(self, text: str) -> List[Tuple[str, str]]:
         """Extract search requests with improved validation"""
@@ -766,8 +749,8 @@ Instructions: Based on the provided search results, please give a comprehensive 
             self.log_message.emit(f"Validator agent failed: {e}")
             return "pass"
 
-    def retry_search_with_refinement(self, original_search: Tuple[str, str]) -> str:
-        """Retry search with refined query based on validation failure"""
+    def retry_search_with_refinement(self, original_search: Tuple[str, str]) -> Tuple[str, List[Dict]]:
+        """Retry search and return content string and a list of source dicts."""
         original_query, original_domain = original_search
         
         self.log_message.emit("Attempting refined search...")
@@ -788,21 +771,18 @@ Instructions: Based on the provided search results, please give a comprehensive 
         for refined_query, refined_domain in refined_queries[:6]:
             self.log_message.emit(f"Trying refined search: '{refined_query}'" + (f" on {refined_domain}" if refined_domain else ""))
             
-            content, success_count, quality = self.perform_single_search_and_scrape(refined_query, refined_domain)
+            content, success_count, quality, sources = self.perform_single_search_and_scrape(refined_query, refined_domain)
             
             if success_count > 0:
                 validation_result = self.validate_scraped_content(self.prompt, content)
                 if validation_result == "pass":
-                    # MODIFICATION: Removed emoji for cleaner logs
                     self.log_message.emit("[Validator] Refined search passed validation.")
-                    return content
+                    return content, sources
                 else:
-                    # MODIFICATION: Removed emoji for cleaner logs
                     self.log_message.emit(f"[Validator] Refined search also failed: {validation_result}")
             
-        # MODIFICATION: Removed emoji for cleaner logs
         self.log_message.emit("[Search] All refined search attempts failed.")
-        return ""
+        return "", []
 
     def get_ollama_response(self, messages: list) -> str:
         """Get response from the main Ollama model using a list of messages."""
@@ -836,46 +816,24 @@ Instructions: Based on the provided search results, please give a comprehensive 
         self.log_message.emit(f"Requesting response from {model_name} with {len(messages)} messages in context...")
         try:
             response = ollama.chat(model=model_name, messages=messages, stream=False)
-            # MODIFICATION: Removed emoji for cleaner logs
             self.log_message.emit(f"[Ollama] {model_name} response received.")
             return response['message']['content']
         except Exception as e:
-            # MODIFICATION: Removed emoji for cleaner logs
             self.log_message.emit(f"[Ollama] {model_name} request failed: {e}")
             raise
 
-    # --- MODIFICATION: HELPER METHODS TO GUARANTEE SOURCES ---
-    def _parse_scraped_results(self, results_string: str) -> List[Dict[str, str]]:
-        """Parses the combined <result> string to extract source metadata."""
-        sources = []
-        result_pattern = r'<result url="([^"]+)" date="([^"]*)">(.*?)</result>'
-        title_pattern = r'<title>(.*?)</title>'
-        
-        result_matches = re.findall(result_pattern, results_string, re.DOTALL)
-        
-        for url, date, inner_content in result_matches:
-            title_match = re.search(title_pattern, inner_content, re.DOTALL)
-            title = title_match.group(1).strip() if title_match else "Unknown Title"
-            
-            if not any(s['url'] == url for s in sources):
-                sources.append({'url': url, 'date': date, 'title': title})
-                
-        return sources
-
-    def _inject_sources(self, response_text: str, source_material: str) -> str:
+    def _attach_sources_to_response(self, response_text: str, sources: List[Dict]) -> str:
         """
-        Ensures the final response includes a properly formatted <sources> block
-        by programmatically adding it, removing any model-generated one.
+        Deterministically attaches a <sources> block to the response using the
+        ground-truth list of sources, removing any model-generated block.
         """
-        if not source_material:
-            return response_text
-
-        sources = self._parse_scraped_results(source_material)
         if not sources:
             return response_text
 
+        # Remove any <sources> block the model might have generated.
         clean_response = re.sub(r'<sources>.*?</sources>', '', response_text, flags=re.DOTALL).strip()
 
+        # Build the new, guaranteed-correct sources block.
         sources_lines = []
         for source in sources:
             sources_lines.append(f'<source url="{source["url"]}" date="{source["date"]}">{source["title"]}</source>')

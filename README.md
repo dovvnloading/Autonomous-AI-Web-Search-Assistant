@@ -20,9 +20,15 @@ This assistant doesn’t just answer questions—it reasons. It operates a chain
 
 Think of it as your own **local, autonomous research agent**: more accurate than a standard chatbot and completely in your control.
 
-![Demo Video](https://github.com/user-attachments/assets/68b44701-85b0-4450-9deb-4b97a1113e66)
-<br>
-<img alt="Screenshot of the Application" src="https://github.com/user-attachments/assets/fb98b86d-7b24-4217-9b84-fe3b0c5ed064" width="1100" />
+![Untitled video - Made with Clipchamp (5)](https://github.com/user-attachments/assets/beec702c-0896-4eb1-811a-53a0daf943c6)
+
+---
+
+<img width="1100" height="750" alt="Screenshot 2025-08-22 094258" src="https://github.com/user-attachments/assets/eebbf329-8b9a-405b-80d8-d372a24dc4ba" />
+
+---
+
+<img width="1100" height="750" alt="Screenshot 2025-08-22 094205" src="https://github.com/user-attachments/assets/d0f264d6-8a24-41af-9592-1db9dbfe7bcc" />
 
 ---
 

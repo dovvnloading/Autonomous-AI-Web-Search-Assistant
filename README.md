@@ -20,15 +20,22 @@ This assistant doesn’t just answer questions—it reasons. It operates a chain
 
 Think of it as your own **local, autonomous research agent**: more accurate than a standard chatbot and completely in your control.
 
-![Untitled video - Made with Clipchamp (5)](https://github.com/user-attachments/assets/beec702c-0896-4eb1-811a-53a0daf943c6)
+![Untitled video - Made with Clipchamp (6)](https://github.com/user-attachments/assets/0c493f82-6343-4c33-964b-7b792a118ff6)
 
 ---
 
-<img width="1100" height="750" alt="Screenshot 2025-08-22 094258" src="https://github.com/user-attachments/assets/eebbf329-8b9a-405b-80d8-d372a24dc4ba" />
+<img width="1100" height="750" alt="Screenshot 2025-08-22 134740" src="https://github.com/user-attachments/assets/e90fd8c2-a75f-48fc-910a-3fdd421cbe0a" />
+
 
 ---
 
-<img width="1100" height="750" alt="Screenshot 2025-08-22 094205" src="https://github.com/user-attachments/assets/d0f264d6-8a24-41af-9592-1db9dbfe7bcc" />
+
+<img width="1100" height="750" alt="Screenshot 2025-08-22 134815" src="https://github.com/user-attachments/assets/65ddf6bc-3279-48af-94f6-f0edcd84889e" />
+
+---
+
+<img width="1100" height="750" alt="Screenshot 2025-08-22 135904" src="https://github.com/user-attachments/assets/aea72000-3b65-44a4-b98e-1f62192fb1a8" />
+
 
 ---
 

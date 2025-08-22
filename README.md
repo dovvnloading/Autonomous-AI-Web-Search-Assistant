@@ -118,9 +118,8 @@ Follow these instructions to get the AI assistant running on your local machine.
 Once the prerequisites are met and dependencies are installed, start the application:
 
 ```bash
-python main.py
+python Ai_Web_Search.py
 ```
-*(Assuming the main script is named `main.py`)*
 
 ## Usage Guide
 
@@ -130,7 +129,7 @@ python main.py
     -   **Disabled (Default):** The AI decides if a search is needed.
     -   **Enabled (Highlighted Green):** Forces the AI to use its search agents, guaranteeing the most current information.
 -   **Expandable Details:** Responses may include "Thinking Process" and "Sources" buttons. Click these to see the agent's internal monologue and view the source citations.
--   **New Chat:** The "✨ New Chat" button clears the conversation and the AI's memory, allowing you to start a fresh session.
+-   **New Chat:** The "New Chat" button clears the conversation and the AI's memory, allowing you to start a fresh session.
 
 ## Contributing
 

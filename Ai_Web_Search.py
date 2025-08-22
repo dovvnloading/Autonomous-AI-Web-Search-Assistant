@@ -180,6 +180,7 @@ Analyze whether the scraped content can adequately answer the user's query. Cons
 - Content contains specific, actionable data the user needs
 - Information appears current/recent for time-sensitive queries
 - Content quality is sufficient to generate a good answer
+- NEVER BE OVERLY VERBOSE! - GET STRAIGHT TO THE POINT! - YOUR OUTPUT SHOULD NOT BE LONG OR EXTENSIVE! 
 
 **FAIL Criteria (output <fail>):**
 - Content is off-topic or unrelated to the query
@@ -235,10 +236,6 @@ The <domain> tag is OPTIONAL. Only use it when you have high confidence in a spe
 ADDITIONAL SEARCH FORMAT (Your entire response must be only this):
 <additional_search><query>your new, refined, and specific search query</query></additional_search>
 
-## VITAL!!! - SOURCE FORMAT REQUIRED:
-<sources>
-<source url="actual-scraped-url" date="extracted-date">Clean Title from Results</source>
-</sources> (I MUST ALWAYS INCLUDE THIS AT THE END OF EACH MESSAGE THE CONTAINS WEB DATA)
 
 ## RESPONSE FORMATTING:
 - You MUST use Markdown for all formatting (e.g., **bold**, *italics*, bullet points with `*` or `-`).
@@ -299,7 +296,7 @@ class SearchWorker(QThread):
             
             messages = [system_message] + sanitized_history + [current_user_message]
             
-            response = ollama.chat(model='qwen3:4b', messages=messages, stream=False)
+            response = ollama.chat(model='qwen3:8b', messages=messages, stream=False)
             plan = response['message']['content'].strip()
             # MODIFICATION: Removed emoji for cleaner logs
             self.log_message.emit(f"[IntentAgent] Plan received:\n{plan}\n")
@@ -313,6 +310,10 @@ class SearchWorker(QThread):
         try:
             self.log_message.emit("\n" + "─"*15 + " New Request Started " + "─"*15)
             
+            # MODIFICATION: Variable to track the raw source material used for synthesis.
+            source_material_for_synthesis = ""
+            final_response = ""
+
             if self.force_search:
                 search_plan = self._get_search_plan(self.prompt)
                 if search_plan:
@@ -368,6 +369,10 @@ class SearchWorker(QThread):
                         # MODIFICATION: Removed emoji for cleaner logs
                         self.log_message.emit("[Validator] Content passed relevance check.")
                         self.progress.emit("Synthesizing validated response...")
+                        
+                        # MODIFICATION: This content is being used for synthesis.
+                        source_material_for_synthesis = scraped_content
+
                         synthesis_prompt = f"""<think>
 The initial search was successful and the validator confirmed the content is relevant. Now I will synthesize this information into a clear, concise answer for the user, making sure to include citations from the provided content.
 </think>
@@ -375,7 +380,15 @@ The initial search was successful and the validator confirmed the content is rel
 VALIDATED SEARCH RESULTS:
 {scraped_content}
 
-Instructions: Based on the provided search results, please give a comprehensive answer to the user's last question. Include proper source citations."""
+Instructions: Based on the provided search results, please give a comprehensive answer to the user's last question. 
+
+
+## VITAL!!! - SOURCE FORMAT REQUIRED:
+<sources>
+<source url="actual-scraped-url" date="extracted-date">Clean Title from Results</source>
+</sources> (I MUST ALWAYS INCLUDE THIS AT THE END OF EACH MESSAGE THE CONTAINS WEB DATA)
+
+"""
                         
                         messages_for_synthesis = messages_for_planning + [
                             {'role': 'assistant', 'content': initial_model_response},
@@ -399,18 +412,21 @@ Instructions: Based on the provided search results, please give a comprehensive 
                                     self.log_message.emit("[Validator] Additional search content passed.")
                                     self.progress.emit("Synthesizing final response with all data...")
                                     
+                                    # MODIFICATION: Both initial and additional content are used.
+                                    source_material_for_synthesis += "\n\n" + additional_scraped_content
+
                                     final_synthesis_prompt = f"""<think>
-My first search provided some information, but I determined it was insufficient and requested an additional search for '{additional_query}'. That search was successful. Now I have the results from both searches and will combine them into a single, comprehensive final answer.
-</think>
+                                    My first search provided some information, but I determined it was insufficient and requested an additional search for '{additional_query}'. That search was successful. Now I have the results from both searches and will combine them into a single, comprehensive final answer.
+                                    </think>
 
-INITIAL SEARCH RESULTS:
-{scraped_content}
+                                    INITIAL SEARCH RESULTS:
+                                    {scraped_content}
 
-ADDITIONAL SEARCH RESULTS:
-{additional_scraped_content}
+                                    ADDITIONAL SEARCH RESULTS:
+                                    {additional_scraped_content}
 
-Instructions: Based on the combined information from BOTH sets of search results, please give a final, comprehensive answer to the user's last question. It is critical to synthesize information from both contexts and include all relevant source citations.
-"""
+                                    Instructions: Based on the combined information from BOTH sets of search results, please give a final, comprehensive answer to the user's last question.
+                                    """
                                     messages_for_final_synthesis = messages_for_synthesis + [
                                         {'role': 'assistant', 'content': synthesis_response_1}, # This is the <additional_search> tag
                                         {'role': 'user', 'content': final_synthesis_prompt}
@@ -419,19 +435,19 @@ Instructions: Based on the combined information from BOTH sets of search results
                                 else:
                                     self.log_message.emit("[Validator] Additional search content FAILED validation. Using initial results only.")
                                     fallback_prompt = f"""<think>
-I attempted an additional search for '{additional_query}', but the results were not relevant. I must now answer using only the initial search results. I will answer the user's question as best I can with the information I have.
-</think>
-INITIAL SEARCH RESULTS:{scraped_content}
-Instructions: Your additional search failed validation. Answer the user's question using ONLY the initial search results provided above."""
+                                    I attempted an additional search for '{additional_query}', but the results were not relevant. I must now answer using only the initial search results. I will answer the user's question as best I can with the information I have.
+                                    </think>
+                                    INITIAL SEARCH RESULTS:{scraped_content}
+                                    Instructions: Your additional search failed validation. Answer the user's question using ONLY the initial search results provided above."""
                                     messages_for_fallback = messages_for_synthesis + [{'role': 'assistant', 'content': synthesis_response_1}, {'role': 'user', 'content': fallback_prompt}]
                                     final_response = self.get_ollama_response(messages=messages_for_fallback)
                             else:
                                 self.log_message.emit("[Search] Additional search returned no content. Using initial results only.")
                                 fallback_prompt = f"""<think>
-I attempted an additional search for '{additional_query}', but it returned no usable content. I must now answer using only the initial search results. I will answer the user's question as best I can with the information I have.
-</think>
-INITIAL SEARCH RESULTS:{scraped_content}
-Instructions: Your additional search failed to find anything. Answer the user's question using ONLY the initial search results provided above."""
+                                I attempted an additional search for '{additional_query}', but it returned no usable content. I must now answer using only the initial search results. I will answer the user's question as best I can with the information I have.
+                                </think>
+                                INITIAL SEARCH RESULTS:{scraped_content}
+                                Instructions: Your additional search failed to find anything. Answer the user's question using ONLY the initial search results provided above."""
                                 messages_for_fallback = messages_for_synthesis + [{'role': 'assistant', 'content': synthesis_response_1}, {'role': 'user', 'content': fallback_prompt}]
                                 final_response = self.get_ollama_response(messages=messages_for_fallback)
 
@@ -446,14 +462,16 @@ Instructions: Your additional search failed to find anything. Answer the user's 
                         
                         refined_content = self.retry_search_with_refinement(search_requests[0])
                         if refined_content:
+                            # MODIFICATION: Refined content is being used.
+                            source_material_for_synthesis = refined_content
                             refined_synthesis_prompt = f"""<think>
-The first search failed validation. I have conducted a refined search which yielded better results. I will now synthesize this new content into the final answer.
-</think>
+                            The first search failed validation. I have conducted a refined search which yielded better results. I will now synthesize this new content into the final answer.
+                            </think>
 
-REFINED SEARCH RESULTS:
-{refined_content}
+                            REFINED SEARCH RESULTS:
+                            {refined_content}
 
-Instructions: Based on these new search results, please give a comprehensive answer to the user's last question. Include proper source citations."""
+                            Instructions: Based on these new search results, please give a comprehensive answer to the user's last question."""
                             messages_for_refined_synthesis = messages_for_planning + [
                                 {'role': 'assistant', 'content': initial_model_response},
                                 {'role': 'user', 'content': refined_synthesis_prompt}
@@ -473,8 +491,11 @@ Instructions: Based on these new search results, please give a comprehensive ans
                 self.log_message.emit("Model determined no search needed. Using existing knowledge.")
                 final_response = initial_model_response
 
+            # MODIFICATION: The final injection step, just before emitting the result.
+            final_response_with_sources = self._inject_sources(final_response, source_material_for_synthesis)
+
             self.log_message.emit("─"*17 + " Request Completed " + "─"*16 + "\n")
-            self.finished.emit(final_response)
+            self.finished.emit(final_response_with_sources)
 
         except Exception as e:
             import traceback
@@ -673,8 +694,8 @@ Instructions: Based on these new search results, please give a comprehensive ans
         if content_length < 300:
             return f"<result url='{url}' title='{title}' date='{date}' error='Content below quality threshold'></result>", False, 0
         
-        if content_length > 8000:
-            content_to_use = content_to_use[:8000] + "..."
+        if content_length > 6000:
+            content_to_use = content_to_use[:6000] + "..."
         
         formatted_string = f"""<result url="{url}" date="{date}">
         <title>{title}</title>
@@ -730,7 +751,7 @@ Instructions: Based on these new search results, please give a comprehensive ans
         """
         try:
             validator_messages = self.validator_messages + [{'role': 'user', 'content': validation_prompt}]
-            response = ollama.chat(model='qwen3:4b', messages=validator_messages, stream=False)
+            response = ollama.chat(model='qwen3:8b', messages=validator_messages, stream=False)
             validator_output = response['message']['content'].strip()
             
             if '<pass>' in validator_output.lower():
@@ -822,6 +843,46 @@ Instructions: Based on these new search results, please give a comprehensive ans
             # MODIFICATION: Removed emoji for cleaner logs
             self.log_message.emit(f"[Ollama] {model_name} request failed: {e}")
             raise
+
+    # --- MODIFICATION: HELPER METHODS TO GUARANTEE SOURCES ---
+    def _parse_scraped_results(self, results_string: str) -> List[Dict[str, str]]:
+        """Parses the combined <result> string to extract source metadata."""
+        sources = []
+        result_pattern = r'<result url="([^"]+)" date="([^"]*)">(.*?)</result>'
+        title_pattern = r'<title>(.*?)</title>'
+        
+        result_matches = re.findall(result_pattern, results_string, re.DOTALL)
+        
+        for url, date, inner_content in result_matches:
+            title_match = re.search(title_pattern, inner_content, re.DOTALL)
+            title = title_match.group(1).strip() if title_match else "Unknown Title"
+            
+            if not any(s['url'] == url for s in sources):
+                sources.append({'url': url, 'date': date, 'title': title})
+                
+        return sources
+
+    def _inject_sources(self, response_text: str, source_material: str) -> str:
+        """
+        Ensures the final response includes a properly formatted <sources> block
+        by programmatically adding it, removing any model-generated one.
+        """
+        if not source_material:
+            return response_text
+
+        sources = self._parse_scraped_results(source_material)
+        if not sources:
+            return response_text
+
+        clean_response = re.sub(r'<sources>.*?</sources>', '', response_text, flags=re.DOTALL).strip()
+
+        sources_lines = []
+        for source in sources:
+            sources_lines.append(f'<source url="{source["url"]}" date="{source["date"]}">{source["title"]}</source>')
+        
+        sources_block = "<sources>\n" + "\n".join(sources_lines) + "\n</sources>"
+
+        return f"{clean_response}\n\n{sources_block}"
 
 class CustomTitleBar(QWidget):
     def __init__(self, parent):

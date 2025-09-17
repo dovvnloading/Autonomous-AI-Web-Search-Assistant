@@ -28,7 +28,6 @@ class SemanticMemory:
 
     def _log(self, message, level="MEMORY"):
         if self.log_callback:
-            # MODIFICATION: Now passes a level along with the message
             self.log_callback(f"{message}", level)
 
     def _get_embedding(self, text: str) -> np.ndarray:
@@ -38,7 +37,7 @@ class SemanticMemory:
             return np.array(response['embedding'])
         except Exception as e:
             self._log(f"Error generating embedding: {e}", "ERROR")
-            return np.zeros(768) # Assuming nomic-embed-text has a dimension of 768
+            return np.zeros(768) 
 
     @staticmethod
     def _cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
@@ -160,42 +159,43 @@ Your Response:
 </search_plan>
 """
 
-# --- VALIDATOR AGENT SYSTEM PROMPT ---
-VALIDATOR_PROMPT = """You are a Content Validation Agent. Your sole job is to determine if scraped web content is relevant and useful for answering a user's specific query.
+# =========================================================================================
+# === MODIFIED VALIDATOR_PROMPT ===========================================================
+# =========================================================================================
+VALIDATOR_PROMPT = """You are a strict Content Validation Agent. Your only job is to determine if scraped web content is relevant for answering a user's query.
 
 ## YOUR INPUTS:
-1. USER QUERY: The original question the user asked
-2. SCRAPED CONTENT: Web content that was retrieved from search results
+1.  **USER QUERY:** The original question the user asked.
+2.  **SCRAPED CONTENT:** Web content retrieved from a search.
 
 ## YOUR TASK:
-Analyze whether the scraped content can adequately answer the user's query. Consider:
+Analyze whether the SCRAPED CONTENT adequately answers the USER QUERY.
 
-**PASS Criteria (output <pass>):**
-- Content directly addresses the user's question
-- Information is relevant and on-topic
-- Content contains specific, actionable data the user needs
-- Information appears current/recent for time-sensitive queries
-- Content quality is sufficient to generate a good answer
-- NEVER BE OVERLY VERBOSE! - GET STRAIGHT TO THE POINT! - YOUR OUTPUT SHOULD NOT BE LONG OR EXTENSIVE! 
+### PASS Criteria (`<pass>`):
+- The content directly addresses the user's question.
+- The information is on-topic, specific, and useful.
+- The content appears current for time-sensitive queries.
+- The content quality is high enough to generate a good answer.
 
-**FAIL Criteria (output <fail>):**
-- Content is off-topic or unrelated to the query
-- Information is too generic/vague to be useful
-- Content is clearly outdated for current information requests
-- Scraped content is mostly navigation text, ads, or junk
-- Content doesn't contain the specific information requested
+### FAIL Criteria (`<fail>`):
+- The content is off-topic or unrelated.
+- The information is too generic, vague, or is just a list of links.
+- The content is clearly outdated for a request about current information.
+- The content is primarily navigation text, ads, cookie consent notices, or other junk.
 
-## OUTPUT FORMAT:
-You must respond with ONLY one of these formats:
+## CRITICAL RULES FOR OUTPUT FORMAT:
+1.  **YOUR ENTIRE RESPONSE MUST START WITH EITHER `<pass>` OR `<fail>`.**
+2.  **YOU MUST NOT ADD ANY OTHER TEXT, EXPLANATION, OR COMMENTARY BEFORE THE TAG.**
+3.  Follow the exact formats below. This is not optional.
 
-For relevant content:
-<pass>Content adequately addresses the query about [brief topic]</pass>
+### Format for relevant content:
+<pass>Content adequately addresses the query about [brief topic].</pass>
 
-For irrelevant content:
-<fail>Content is [specific reason - off-topic/outdated/generic/insufficient]</fail>
+### Format for irrelevant content:
+<fail>Content is [specific reason - e.g., off-topic, outdated, too generic, insufficient detail].</fail>
 """
 
-# --- NEW: REFINEMENT AGENT SYSTEM PROMPT ---
+# --- REFINEMENT AGENT SYSTEM PROMPT ---
 REFINER_PROMPT = """You are an expert Search Query Refinement Agent. Your purpose is to improve a failed search attempt by generating a better search plan.
 
 ## YOUR INPUTS:
@@ -234,6 +234,76 @@ You MUST respond with ONLY the `<refined_plan>` format. Do not add any commentar
 <topic>in-depth review of Tesla Model 3 Highland interior</topic>
 <topic>common problems with Tesla Model 3 after 50000 miles</topic>
 </refined_plan>
+"""
+
+# =========================================================================================
+# === NEW: ABSTRACTION AGENT SYSTEM PROMPT ================================================
+# =========================================================================================
+ABSTRACTION_PROMPT = """You are a Data Abstraction Agent. Your role is to process raw, scraped web content and organize it into a structured, summarized format for a Synthesis Agent. You are a critical step in a pipeline; your output must be clear, factual, and preserve all source information.
+
+## YOUR INPUTS:
+1.  **ORIGINAL USER QUERY:** The user's ultimate question.
+2.  **RAW SCRAPED DATA:** A block of text containing one or more `<result>` blocks, each with a URL, title, date, and raw content.
+
+## YOUR CRITICAL TASK:
+1.  **Understand Intent:** Analyze the USER QUERY to grasp what information is important.
+2.  **Process Each Source:** For each `<result>` block provided:
+    a. Read the `<content>`.
+    b. Extract the key facts, figures, and statements that directly relate to the USER QUERY.
+    c. Ignore irrelevant information like ads, navigation links, cookie notices, and off-topic paragraphs.
+    d. Summarize the relevant information concisely.
+3.  **Structure the Output:** Organize the extracted information into a clean, logical format. Use Markdown for clarity. The goal is to make the data easily digestible for the next AI.
+4.  **Preserve Attribution:** CRITICAL! For each piece of summarized information, you MUST retain its original source attribution. The final output must be a collection of structured data blocks, one for each source.
+
+## OUTPUT FORMAT (MANDATORY):
+You MUST respond with ONLY the `<structured_data>` format. Do not add any commentary or explanation. Group the extracted key points under the source they came from.
+
+<structured_data>
+
+<source_summary url="[URL from original result]" title="[Title from original result]" date="[Date from original result]">
+### Key Points from "[Title from original result]":
+- [First key point, fact, or figure relevant to the user query.]
+- [Second key point, directly answering a part of the user query.]
+- [Third relevant piece of information.]
+- (Summarize any other important details here.)
+</source_summary>
+
+<source_summary url="[URL of second result]" title="[Title of second result]" date="[Date of second result]">
+### Key Points from "[Title of second result]":
+- [Key information from the second source.]
+- [Specific data or quotes found in this source.]
+</source_summary>
+
+</structured_data>
+
+## EXAMPLE:
+
+**USER QUERY:** "What are the performance specs of the 2024 Porsche 911 GT3 RS?"
+
+**RAW SCRAPED DATA:**
+<result url="porsche.com/gt3rs" date="2024-01-15"><title>Porsche 911 GT3 RS Official Page</title><content>...tons of marketing text... The 4.0-liter high-revving naturally aspirated engine produces 518 hp... reaches 60 mph in 3.0 seconds... top speed is 184 mph. ...more marketing...</content></result>
+<result url="caranddriver.com/reviews" date="2024-02-20"><title>Review: 2024 Porsche 911 GT3 RS</title><content>...review text... We tested the 0-60 time and got a blistering 2.9 seconds. The engine, a flat-six, makes 518 horsepower and torque is 342 lb-ft. ...text about the wing...</content></result>
+
+**YOUR RESPONSE:**
+<structured_data>
+
+<source_summary url="porsche.com/gt3rs" title="Porsche 911 GT3 RS Official Page" date="2024-01-15">
+### Key Points from "Porsche 911 GT3 RS Official Page":
+- Engine: 4.0-liter high-revving naturally aspirated.
+- Horsepower: 518 hp.
+- 0-60 mph: 3.0 seconds.
+- Top Speed: 184 mph.
+</source_summary>
+
+<source_summary url="caranddriver.com/reviews" title="Review: 2024 Porsche 911 GT3 RS" date="2024-02-20">
+### Key Points from "Review: 2024 Porsche 911 GT3 RS":
+- 0-60 mph (tested): 2.9 seconds.
+- Engine Type: Flat-six.
+- Horsepower: 518 hp.
+- Torque: 342 lb-ft.
+</source_summary>
+
+</structured_data>
 """
 
 
@@ -287,7 +357,6 @@ class SearchWorker(QThread):
     finished = Signal(str)
     error = Signal(str)
     progress = Signal(str)
-    # MODIFICATION: Signal now emits a message string and a level string
     log_message = Signal(str, str)
 
     HEADERS = {
@@ -309,6 +378,7 @@ class SearchWorker(QThread):
         self.main_messages = [{'role': 'system', 'content': formatted_main_prompt}]
         self.validator_messages = [{'role': 'system', 'content': VALIDATOR_PROMPT}]
         self.refiner_messages = [{'role': 'system', 'content': REFINER_PROMPT}]
+        self.abstraction_messages = [{'role': 'system', 'content': ABSTRACTION_PROMPT}]
 
 
     def _get_search_plan(self, user_query: str) -> str:
@@ -369,6 +439,35 @@ class SearchWorker(QThread):
         except Exception as e:
             self.log_message.emit(f"RefinerAgent Failed: {e}. Cannot refine search.", "ERROR")
             return []
+            
+    def _structure_scraped_data(self, user_query: str, raw_scraped_data: str) -> str:
+        """Calls the Data Abstraction Agent to process and structure raw scraped content."""
+        self.log_message.emit("Calling AbstractionAgent to structure and summarize data...", "AGENT_CALL")
+        self.progress.emit("Abstracting key information...")
+        
+        abstraction_task_prompt = f"""ORIGINAL USER QUERY: {user_query}
+        
+        RAW SCRAPED DATA:
+        {raw_scraped_data}
+        """
+        try:
+            messages = self.abstraction_messages + [{'role': 'user', 'content': abstraction_task_prompt}]
+            response = ollama.chat(model='qwen3:8b', messages=messages, stream=False)
+            structured_output = response['message']['content'].strip()
+            
+            match = re.search(r'<structured_data>(.*?)</structured_data>', structured_output, re.DOTALL)
+            if match:
+                clean_structured_data = match.group(1).strip()
+                self.log_message.emit("AbstractionAgent successfully structured the data.", "INFO")
+                self.log_message.emit(f"STRUCTURED DATA:\n{clean_structured_data}", "PAYLOAD")
+                return clean_structured_data
+            else:
+                self.log_message.emit("AbstractionAgent response did not contain valid <structured_data> tags. Falling back to raw data.", "WARN")
+                return raw_scraped_data
+
+        except Exception as e:
+            self.log_message.emit(f"AbstractionAgent failed: {e}. Falling back to raw data.", "ERROR")
+            return raw_scraped_data
 
     def run(self):
         try:
@@ -388,7 +487,7 @@ class SearchWorker(QThread):
                     if topics:
                         search_requests = [(topic.strip(), None) for topic in topics]
                         self.log_message.emit(f"Forced plan parsed into {len(search_requests)} search operations.", "INFO")
-                        self.prompt = f"{search_plan}\n\nOriginal Query: {self.prompt}"
+                        # Do not modify self.prompt here, keep it as the original user query
                     else:
                         self.log_message.emit("Plan was generated but no topics found. Using original prompt as fallback.", "WARN")
                         search_requests = [(self.prompt, None)]
@@ -416,10 +515,6 @@ class SearchWorker(QThread):
                 self.progress.emit("Analyzing query and planning response...")
                 initial_model_response = self.get_ollama_response(messages=messages_for_planning)
                 search_requests = self.extract_search_requests(initial_model_response)
-
-            if len(search_requests) > 1:
-                self.log_message.emit(f"Model attempted {len(search_requests)} searches. Limiting to 1 for quality.", "WARN")
-                search_requests = search_requests[:1]
 
             if search_requests:
                 search_basis = 'forced plan' if self.force_search else 'model analysis'
@@ -454,16 +549,29 @@ class SearchWorker(QThread):
                     
                     if validation_result == "pass":
                         self.log_message.emit("Validator: Content passed relevance check.", "INFO")
+                        
+                        structured_data = self._structure_scraped_data(self.prompt, scraped_content)
                         self.progress.emit("Synthesizing validated response...")
                         
                         sources_used_for_synthesis.extend(sources_from_search)
-
-                        synthesis_prompt = f"""<think>
-                        The initial search was successful and the validator confirmed the content is relevant. Now I will synthesize this information into a clear, concise answer for the user, making sure to include citations from the provided content.
+                        
+                        synthesis_prompt = f"""
+                        <think>
+                        The search was successful, validated, and the data has been structured. I will now synthesize this data to directly answer the user's specific query.
                         </think>
-                        VALIDATED SEARCH RESULTS:{scraped_content}
-                        Instructions: Based on the provided search results, please give a comprehensive answer to the user's last question. 
+                        
+                        <task>
+                        <user_query>{self.prompt}</user_query>
+                        <instructions>
+                        You MUST use the provided structured data summary to construct a direct and complete answer to the `user_query` above. Do not deviate. Synthesize the information from all sources into a cohesive response and include citations.
+                        </instructions>
+                        </task>
+                        
+                        <data>
+                        {structured_data}
+                        </data>
                         """
+                        
                         messages_for_synthesis = messages_for_planning + [
                             {'role': 'assistant', 'content': initial_model_response},
                             {'role': 'user', 'content': synthesis_prompt}
@@ -483,14 +591,29 @@ class SearchWorker(QThread):
 
                                 if additional_validation == "pass":
                                     self.log_message.emit("Validator: Additional search content passed.", "INFO")
+                                    
+                                    combined_raw_data = scraped_content + "\n\n" + additional_scraped_content
+                                    final_structured_data = self._structure_scraped_data(self.prompt, combined_raw_data)
                                     self.progress.emit("Synthesizing final response with all data...")
                                     sources_used_for_synthesis.extend(sources_from_add_search)
-                                    final_synthesis_prompt = f"""<think>
-                                    My first search provided some information, but I determined it was insufficient and requested an additional search for '{additional_query}'. That search was successful. Now I have the results from both searches and will combine them into a single, comprehensive final answer.
+                                    
+                                    final_synthesis_prompt = f"""
+                                    <think>
+                                    My initial search was good, but an additional search was performed and also validated. I now have combined, structured data from all searches. I will synthesize this complete dataset to provide a comprehensive answer to the user's original query.
                                     </think>
-                                    INITIAL SEARCH RESULTS:{scraped_content}
-                                    ADDITIONAL SEARCH RESULTS:{additional_scraped_content}
-                                    Instructions: Based on the combined information from BOTH sets of search results, please give a final, comprehensive answer to the user's last question. It is critical to synthesize information from both contexts."""
+                                    
+                                    <task>
+                                    <user_query>{self.prompt}</user_query>
+                                    <instructions>
+                                    You MUST use the provided COMBINED structured data summary to construct a final, direct, and complete answer to the `user_query` above. It is critical to synthesize information from ALL provided sources into a single, cohesive response.
+                                    </instructions>
+                                    </task>
+                                    
+                                    <data>
+                                    {final_structured_data}
+                                    </data>
+                                    """
+
                                     messages_for_final_synthesis = messages_for_synthesis + [
                                         {'role': 'assistant', 'content': synthesis_response_1},
                                         {'role': 'user', 'content': final_synthesis_prompt}
@@ -498,16 +621,16 @@ class SearchWorker(QThread):
                                     final_response = self.get_ollama_response(messages=messages_for_final_synthesis)
                                 else:
                                     self.log_message.emit("Validator: Additional search content FAILED. Using initial results only.", "WARN")
-                                    fallback_prompt = f"""<think>I attempted an additional search for '{additional_query}', but the results were not relevant. I must now answer using only the initial search results. I will answer the user's question as best I can with the information I have.</think>
-                                    INITIAL SEARCH RESULTS:{scraped_content}
-                                    Instructions: Your additional search failed validation. Answer the user's question using ONLY the initial search results provided above."""
+                                    fallback_prompt = f"""<think>I attempted an additional search for '{additional_query}', but the results were not relevant. I must now answer using only the initial structured data. I will answer the user's question as best I can with the information I have.</think>
+                                    INITIAL STRUCTURED DATA SUMMARY:{structured_data}
+                                    Instructions: Your additional search failed validation. Answer the user's question using ONLY the initial structured data summary provided above."""
                                     messages_for_fallback = messages_for_synthesis + [{'role': 'assistant', 'content': synthesis_response_1}, {'role': 'user', 'content': fallback_prompt}]
                                     final_response = self.get_ollama_response(messages=messages_for_fallback)
                             else:
                                 self.log_message.emit("Additional search returned no content. Using initial results only.", "WARN")
-                                fallback_prompt = f"""<think>I attempted an additional search for '{additional_query}', but it returned no usable content. I must now answer using only the initial search results. I will answer the user's question as best I can with the information I have.</think>
-                                INITIAL SEARCH RESULTS:{scraped_content}
-                                Instructions: Your additional search failed to find anything. Answer the user's question using ONLY the initial search results provided above."""
+                                fallback_prompt = f"""<think>I attempted an additional search for '{additional_query}', but it returned no usable content. I must now answer using only the initial structured data. I will answer the user's question as best I can with the information I have.</think>
+                                INITIAL STRUCTURED DATA SUMMARY:{structured_data}
+                                Instructions: Your additional search failed to find anything. Answer the user's question using ONLY the initial structured data summary provided above."""
                                 messages_for_fallback = messages_for_synthesis + [{'role': 'assistant', 'content': synthesis_response_1}, {'role': 'user', 'content': fallback_prompt}]
                                 final_response = self.get_ollama_response(messages=messages_for_fallback)
                         else:
@@ -529,11 +652,28 @@ class SearchWorker(QThread):
                                     refined_validation = self.validate_scraped_content(self.prompt, refined_content)
                                     if refined_validation == "pass":
                                         self.log_message.emit("Validator: Refined search content PASSED.", "INFO")
+                                        
+                                        refined_structured_data = self._structure_scraped_data(self.prompt, refined_content)
                                         self.progress.emit("Synthesizing refined response...")
                                         sources_used_for_synthesis.extend(sources_from_refined)
-                                        refined_synthesis_prompt = f"""<think>The first search failed validation. I have conducted a refined search which yielded better results. I will now synthesize this new content into the final answer.</think>
-                                        REFINED SEARCH RESULTS:{refined_content}
-                                        Instructions: Based on these new search results, please give a comprehensive answer to the user's last question. Include proper source citations."""
+                                        
+                                        refined_synthesis_prompt = f"""
+                                        <think>
+                                        The first search failed, but a refined search plan yielded better, validated, and structured results. I will use this new data to answer the user's original query.
+                                        </think>
+
+                                        <task>
+                                        <user_query>{self.prompt}</user_query>
+                                        <instructions>
+                                        You MUST use the new structured data from the REFINED search to construct a direct and complete answer to the `user_query` above. Focus only on answering the user's specific question.
+                                        </instructions>
+                                        </task>
+
+                                        <data>
+                                        {refined_structured_data}
+                                        </data>
+                                        """
+                                        
                                         messages_for_refined_synthesis = messages_for_planning + [
                                             {'role': 'assistant', 'content': initial_model_response},
                                             {'role': 'user', 'content': refined_synthesis_prompt}
@@ -709,7 +849,7 @@ class SearchWorker(QThread):
 
         content_length = len(main_content)
         if content_length < 300: return f"<result url='{url}' title='{title}' date='{date}' error='Content below quality threshold'></result>", False, 0, {}
-        if content_length > 8000: main_content = main_content[:8000] + "..."
+        if content_length > 4000: main_content = main_content[:4000] + "..."
         
         formatted_string = f"""<result url="{url}" date="{date}"><title>{title}</title><content>{main_content}</content></result>"""
         source_info = {'url': url, 'title': title, 'date': date}
@@ -725,7 +865,6 @@ class SearchWorker(QThread):
             query, domain = query.strip(), domain.strip() if domain else None
             if len(query) < 3 or any(existing_query.lower() == query.lower() for existing_query, _ in valid_requests): continue
             valid_requests.append((query, domain))
-            if len(valid_requests) >= 1: break
         return valid_requests
 
     def extract_additional_search(self, text: str) -> str:
@@ -738,7 +877,7 @@ class SearchWorker(QThread):
         return ""
 
     def validate_scraped_content(self, user_query: str, scraped_content: str) -> str:
-        """Validator agent to check content relevance"""
+        """Validator agent to check content relevance with improved parsing and logging."""
         self.log_message.emit("Running ValidatorAgent on scraped content...", "AGENT_CALL")
         validation_prompt = f"USER QUERY: {user_query}\n\nSCRAPED CONTENT TO VALIDATE:\n{scraped_content}"
         try:
@@ -746,13 +885,17 @@ class SearchWorker(QThread):
             response = ollama.chat(model='qwen3:8b', messages=validator_messages, stream=False)
             validator_output = response['message']['content'].strip()
             
-            if '<pass>' in validator_output.lower(): return "pass"
-            elif '<fail>' in validator_output.lower():
+            output_lower = validator_output.lower()
+            if output_lower.startswith('<pass>'):
+                return "pass"
+            elif output_lower.startswith('<fail>'):
                 fail_match = re.search(r'<fail>(.*?)</fail>', validator_output, re.IGNORECASE | re.DOTALL)
                 return fail_match.group(1).strip() if fail_match else "Content failed validation"
             else:
                 self.log_message.emit("Validator response was ambiguous. Defaulting to pass.", "WARN")
+                self.log_message.emit(f"AMBIGUOUS VALIDATOR OUTPUT:\n{validator_output}", "PAYLOAD")
                 return "pass"
+                
         except Exception as e:
             self.log_message.emit(f"Validator agent failed: {e}. Defaulting to pass.", "ERROR")
             return "pass"
@@ -819,6 +962,11 @@ class MessageBubble(QWidget):
         self.is_citations_expanded = False
         self.is_thinking_expanded = False
 
+        self.citations_animation = None
+        self.thinking_animation = None
+        self.citations_container = None
+        self.thinking_container = None
+
         self.container = QFrame()
         self.container.setObjectName("messageBubbleContainer")
         self.container.setMinimumWidth(450)
@@ -861,6 +1009,7 @@ class MessageBubble(QWidget):
             self.thinking_animation = QPropertyAnimation(self.thinking_container, b"maximumHeight")
             self.thinking_animation.setDuration(250)
             self.thinking_animation.setEasingCurve(QEasingCurve.InOutQuad)
+            self.thinking_animation.finished.connect(self._on_thinking_animation_finished)
         
         if citations:
             source_count = len(citations)
@@ -900,15 +1049,27 @@ class MessageBubble(QWidget):
             self.citations_animation = QPropertyAnimation(self.citations_container, b"maximumHeight")
             self.citations_animation.setDuration(250)
             self.citations_animation.setEasingCurve(QEasingCurve.InOutQuad)
+            self.citations_animation.finished.connect(self._on_citations_animation_finished)
             
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(self.container)
 
+    def _on_citations_animation_finished(self):
+        if not self.is_citations_expanded:
+            self.citations_container.setVisible(False)
+
+    def _on_thinking_animation_finished(self):
+        if not self.is_thinking_expanded:
+            self.thinking_container.setVisible(False)
+
     def toggle_citations(self):
+        # --- FIX: Stop any existing animation to prevent race conditions on clear ---
+        if self.citations_animation:
+            self.citations_animation.stop()
+
         self.is_citations_expanded = not self.is_citations_expanded
-        try: self.citations_animation.finished.disconnect()
-        except (RuntimeError, TypeError): pass
+        
         if self.is_citations_expanded:
             self.citations_container.setVisible(True)
             self.citations_container.setMaximumHeight(16777215)
@@ -917,13 +1078,15 @@ class MessageBubble(QWidget):
         else:
             self.citations_animation.setStartValue(self.citations_container.height())
             self.citations_animation.setEndValue(0)
-            self.citations_animation.finished.connect(lambda: self.citations_container.setVisible(False))
         self.citations_animation.start()
 
     def toggle_thinking(self):
+        # --- FIX: Stop any existing animation to prevent race conditions on clear ---
+        if self.thinking_animation:
+            self.thinking_animation.stop()
+
         self.is_thinking_expanded = not self.is_thinking_expanded
-        try: self.thinking_animation.finished.disconnect()
-        except (RuntimeError, TypeError): pass
+        
         if self.is_thinking_expanded:
             self.toggle_thinking_button.setText("Hide")
             self.thinking_container.setVisible(True)
@@ -934,14 +1097,11 @@ class MessageBubble(QWidget):
             self.toggle_thinking_button.setText("Thinking Process")
             self.thinking_animation.setStartValue(self.thinking_container.height())
             self.thinking_animation.setEndValue(0)
-            self.thinking_animation.finished.connect(lambda: self.thinking_container.setVisible(False))
         self.thinking_animation.start()
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        # MODIFICATION: The log callback now expects two arguments, so we use a lambda
-        # to adapt the call from SemanticMemory which only provides one.
         self.memory = SemanticMemory(log_callback=lambda msg, level="MEMORY": self.update_log(msg, level))
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
@@ -1086,13 +1246,13 @@ class MainWindow(QMainWindow):
             QScrollBar::handle:vertical { background: #4A4A4A; border-radius: 5px; min-height: 25px; } 
             QScrollBar::handle:vertical:hover { background: #6A6A6A; }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: #252526; }
 
             QScrollBar:horizontal { border: none; background: #252526; height: 10px; margin: 0; }
             QScrollBar::handle:horizontal { background: #4A4A4A; border-radius: 5px; min-width: 25px; }
             QScrollBar::handle:horizontal:hover { background: #6A6A6A; }
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }
-            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: #252526; }
         """
 
     def clear_chat_session(self):
@@ -1123,7 +1283,6 @@ class MainWindow(QMainWindow):
             self.update_log("MODE: Force Search Enabled", "INFO")
 
         self.worker = SearchWorker(text, self.memory, force_search=is_force_search_enabled)
-        # MODIFICATION: The signal now passes two args, which matches update_log perfectly
         self.worker.log_message.connect(self.update_log)
         self.worker.finished.connect(lambda response: self.handle_response(response, original_prompt=text))
         self.worker.error.connect(lambda error: self.handle_error(error, original_prompt=text))
@@ -1196,49 +1355,34 @@ class MainWindow(QMainWindow):
     def update_status(self, status: str):
         self.status_label.setText(status)
 
-    # =========================================================================================
-    # === MODIFIED update_log() METHOD ========================================================
-    # =========================================================================================
     def update_log(self, message: str, level: str = "INFO"):
-        """Appends a styled, color-coded message to the log display based on its level."""
-        
         LOG_LEVEL_STYLES = {
-            "INFO":       "color: #97A3B6;", # Light blue/gray for general info
-            "STEP":       "color: #4EC9B0; font-weight: bold;", # Bright teal for major steps
-            "WARN":       "color: #DDB45D;", # Yellow for warnings
-            "ERROR":      "color: #F47067; font-weight: bold;", # Red for errors
-            "AGENT_CALL": "color: #C586C0; font-style: italic;", # Purple for agent calls
-            "MEMORY":     "color: #6A9955;", # Green for memory operations
-            "USER":       "color: #007ACC; font-weight: bold;", # Blue for user actions
-            "PAYLOAD":    "color: #666666; border-left: 2px solid #444; padding-left: 8px; margin-top: 4px; margin-bottom: 4px;" # Dark gray for data dumps
+            "INFO":       "color: #97A3B6;",
+            "STEP":       "color: #4EC9B0; font-weight: bold;",
+            "WARN":       "color: #DDB45D;",
+            "ERROR":      "color: #F47067; font-weight: bold;",
+            "AGENT_CALL": "color: #C586C0; font-style: italic;",
+            "MEMORY":     "color: #6A9955;",
+            "USER":       "color: #007ACC; font-weight: bold;",
+            "PAYLOAD":    "color: #666666; border-left: 2px solid #444; padding-left: 8px; font-family: Consolas, 'Courier New', monospace; white-space: pre-wrap;"
         }
-        
+
         style = LOG_LEVEL_STYLES.get(level, LOG_LEVEL_STYLES["INFO"])
         timestamp = datetime.now().strftime('%H:%M:%S')
-        
-        # Sanitize message for HTML
+    
         safe_message = message.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br>')
-        
-        # Use <pre> tag for payloads to preserve whitespace and formatting
-        if level == "PAYLOAD":
-            html_content = f"""
-            <div style="margin-bottom: 2px; {style}">
-                <span style="color:#777;">{timestamp} --- </span>
-                <pre style="display: inline; white-space: pre-wrap; margin: 0; font-family: Consolas, 'Courier New', monospace;">{safe_message}</pre>
-            </div>
-            """
-        else:
-            html_content = f"""
-            <div style="margin-bottom: 2px; {style}">
-                <span style="color:#777;">{timestamp} --- </span>
-                <span>{safe_message}</span>
-            </div>
-            """
+    
+        content_html = (
+            f'<p style="margin: 0; padding: 0; {style}">'
+            f'<span style="color:#777;">{timestamp} --- </span>'
+            f'{safe_message}'
+            f'</p>'
+        )
+    
+        spacer_html = '<div style="height: 10px; font-size: 2px;">&nbsp;</div>'
 
-        self.log_display.insertHtml(html_content)
-        
-        scrollbar = self.log_display.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
+        self.log_display.insertHtml(content_html + spacer_html)
+        self.log_display.verticalScrollBar().setValue(self.log_display.verticalScrollBar().maximum())
 
     def set_ui_enabled(self, enabled: bool):
         self.input_field.setEnabled(enabled)

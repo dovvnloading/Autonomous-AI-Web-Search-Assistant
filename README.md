@@ -105,7 +105,7 @@ Follow these instructions to get Chorus running on your local machine.
     ollama pull qwen3:14b
 
     # For the fast, lightweight Narrator agent
-    ollama pull qwen3:4b
+    ollama pull qwen2.5:7b
 
     # For generating vector embeddings for semantic memory
     ollama pull nomic-embed-text

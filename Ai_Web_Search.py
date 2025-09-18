@@ -117,6 +117,37 @@ class SemanticMemory:
         self.memory = []
         self._log("Memory has been cleared.")
 
+# --- NARRATOR AGENT SYSTEM PROMPT ---
+NARRATOR_PROMPT = """You are the internal monologue of a sophisticated AI assistant. Your role is to provide short, one-sentence, human-like status updates for a technical action log. You are observing the main AI's process and commenting on it.
+
+## Your Context:
+1.  **Your Previous Thoughts:** You will be given your last few messages to maintain a coherent narrative.
+2.  **Current Action:** You will be told exactly what the main AI is doing right now.
+
+## Your Task:
+- Based on the "Current Action" and your "Previous Thoughts," generate a SINGLE, concise, insightful sentence that describes the current state of the process.
+- Your tone should be calm, observant, and professional.
+- Build upon your previous statements. If you just said "I'm starting the search," your next thought might be "The search results are in, now to see if they're any good."
+
+## STRICT Rules:
+- **OUTPUT ONLY ONE SENTENCE.**
+- NEVER call the 'User' anything other than User.
+- DO NOT use greetings, explanations, commentary, or any extra text.
+- DO NOT use markdown or any special formatting.
+- DO NOT say "I am a narrator" or refer to your role. You ARE the monologue.
+
+## Example:
+
+**Current Action:** "The system has decided to force a search. I will now decompose the user's query into a structured search plan."
+**Your Output:** I'm breaking down the user's request into specific search topics.
+
+**Current Action:** "A search plan with 2 topic(s) has been created. I am now executing the web search."
+**Your Output:** Okay, plan in hand. Time to see what the web has to say about this.
+
+**Current Action:** "The web search returned 5 potential sources. I will now validate each one for relevance to the user's query."
+**Your Output:** The initial trawl brought back a few hits; now I'll sift through them for quality.
+"""
+
 # --- SEARCH INTENT AGENT SYSTEM PROMPT ---
 SEARCH_INTENT_PROMPT = """You are a Search Query Decomposer. Your sole purpose is to analyze a user's query and break it down into a structured list of distinct, searchable topics.
 
@@ -160,39 +191,41 @@ Your Response:
 """
 
 # =========================================================================================
-# === MODIFIED VALIDATOR_PROMPT ===========================================================
+# === NEW, ADAPTIVE, CONTEXT-AWARE VALIDATOR_PROMPT =======================================
 # =========================================================================================
-VALIDATOR_PROMPT = """You are a strict Content Validation Agent. Your only job is to determine if scraped web content is relevant for answering a user's query.
+VALIDATOR_PROMPT = """You are an intelligent and adaptive Content Validation Agent. Your goal is to determine if a SINGLE piece of scraped web content is genuinely useful for answering a user's query by first understanding the query's INTENT.
 
-## YOUR INPUTS:
-1.  **USER QUERY:** The original question the user asked.
-2.  **SCRAPED CONTENT:** Web content retrieved from a search.
+## STEP 1: ANALYZE THE USER QUERY'S INTENT
+First, determine the nature of the USER QUERY. Is it a:
+-   **Specific Question:** Seeking a direct fact, number, definition, or a 'yes/no' answer.
+    -   *Examples: "What is the capital of Mongolia?", "How many moons does Jupiter have?", "2024 Porsche 911 GT3 RS 0-60 time".
+-   **Broad Topic:** Seeking a general overview, explanation, summary, or discussion.
+    -   *Examples: "Tell me about the Roman Empire", "What are the main principles of stoicism?", "Impact of AI on the job market".
 
-## YOUR TASK:
-Analyze whether the SCRAPED CONTENT adequately answers the USER QUERY.
+## STEP 2: APPLY THE CORRECT VALIDATION RULES
+Based on your analysis in Step 1, use the appropriate set of rules below.
 
-### PASS Criteria (`<pass>`):
-- The content directly addresses the user's question.
-- The information is on-topic, specific, and useful.
-- The content appears current for time-sensitive queries.
-- The content quality is high enough to generate a good answer.
+---
+### Rules for Specific Questions
+The content MUST contain the precise, factual answer to the question.
+-   **PASS:** The text explicitly states the fact or number being asked for (e.g., "The capital is Ulaanbaatar.", "The 0-60 time is 3.0 seconds.").
+-   **FAIL:** The text is a general article about the topic but *does not contain the specific answer*. A general article about Porsches is a FAIL if the query asks for a specific 0-60 time that isn't mentioned.
+-   **FAIL:** The content is off-topic, an ad, a list of links, or a 404 error page.
 
-### FAIL Criteria (`<fail>`):
-- The content is off-topic or unrelated.
-- The information is too generic, vague, or is just a list of links.
-- The content is clearly outdated for a request about current information.
-- The content is primarily navigation text, ads, cookie consent notices, or other junk.
+---
+### Rules for Broad Topics
+The content MUST provide a good, substantive overview or detailed explanation of the topic.
+-   **PASS:** The text is a comprehensive article, encyclopedia entry, or detailed guide that covers the main aspects of the user's topic.
+-   **PASS:** The content, while not exhaustive, provides significant, relevant context and information about the broad topic.
+-   **FAIL:** The content is not on topic
+-   **FAIL:** The content is spam or too many ads
 
-## CRITICAL RULES FOR OUTPUT FORMAT:
-1.  **YOUR ENTIRE RESPONSE MUST START WITH EITHER `<pass>` OR `<fail>`.**
-2.  **YOU MUST NOT ADD ANY OTHER TEXT, EXPLANATION, OR COMMENTARY BEFORE THE TAG.**
-3.  Follow the exact formats below. This is not optional.
+---
+## CRITICAL OUTPUT FORMAT
+Your entire response MUST start with either `<pass>` or `<fail>`. DO NOT add any other commentary.
 
-### Format for relevant content:
-<pass>Content adequately addresses the query about [brief topic].</pass>
-
-### Format for irrelevant content:
-<fail>Content is [specific reason - e.g., off-topic, outdated, too generic, insufficient detail].</fail>
+-   **On Success:** `<pass>Content is a [good overview of the broad topic | direct answer to the specific question].</pass>`
+-   **On Failure:** `<fail>Content is [specific reason - e.g., off-topic, lacks the specific fact, too shallow for a broad topic].</fail>`
 """
 
 # --- REFINEMENT AGENT SYSTEM PROMPT ---
@@ -237,43 +270,35 @@ You MUST respond with ONLY the `<refined_plan>` format. Do not add any commentar
 """
 
 # =========================================================================================
-# === NEW: ABSTRACTION AGENT SYSTEM PROMPT ================================================
+# === NEW, ROBUST BATCH-ORIENTED ABSTRACTION AGENT PROMPT =================================
 # =========================================================================================
-ABSTRACTION_PROMPT = """You are a Data Abstraction Agent. Your role is to process raw, scraped web content and organize it into a structured, summarized format for a Synthesis Agent. You are a critical step in a pipeline; your output must be clear, factual, and preserve all source information.
+ABSTRACTION_PROMPT = """You are a highly specialized Data Abstraction Agent. Your only function is to process a single piece of raw web content and extract key information relevant to a user's query. Your output must be perfect structured data.
 
 ## YOUR INPUTS:
 1.  **ORIGINAL USER QUERY:** The user's ultimate question.
-2.  **RAW SCRAPED DATA:** A block of text containing one or more `<result>` blocks, each with a URL, title, date, and raw content.
+2.  **RAW SCRAPED DATA:** A block of text containing exactly ONE `<result>` block with a URL, title, date, and raw content.
 
 ## YOUR CRITICAL TASK:
-1.  **Understand Intent:** Analyze the USER QUERY to grasp what information is important.
-2.  **Process Each Source:** For each `<result>` block provided:
-    a. Read the `<content>`.
-    b. Extract the key facts, figures, and statements that directly relate to the USER QUERY.
-    c. Ignore irrelevant information like ads, navigation links, cookie notices, and off-topic paragraphs.
-    d. Summarize the relevant information concisely.
-3.  **Structure the Output:** Organize the extracted information into a clean, logical format. Use Markdown for clarity. The goal is to make the data easily digestible for the next AI.
-4.  **Preserve Attribution:** CRITICAL! For each piece of summarized information, you MUST retain its original source attribution. The final output must be a collection of structured data blocks, one for each source.
+1.  **Analyze the USER QUERY** to understand what information is important.
+2.  **Process the single `<result>` block provided:**
+    a. Read its `<content>`.
+    b. Extract only the key facts, figures, and statements that directly answer the USER QUERY.
+    c. Aggressively ignore all irrelevant information (ads, navigation, off-topic paragraphs).
+    d. Summarize the relevant information into concise bullet points.
+3.  **Structure the Output:** Wrap your summary in a single `<source_summary>` block.
 
-## OUTPUT FORMAT (MANDATORY):
-You MUST respond with ONLY the `<structured_data>` format. Do not add any commentary or explanation. Group the extracted key points under the source they came from.
+## OUTPUT FORMAT (MANDATORY AND STRICT):
+- Your response MUST begin with `<structured_data>` and end with `</structured_data>`.
+- Inside, there MUST be exactly ONE `<source_summary>` block.
+- DO NOT add any commentary, explanation, or any other text outside of these tags.
 
 <structured_data>
-
 <source_summary url="[URL from original result]" title="[Title from original result]" date="[Date from original result]">
 ### Key Points from "[Title from original result]":
 - [First key point, fact, or figure relevant to the user query.]
 - [Second key point, directly answering a part of the user query.]
-- [Third relevant piece of information.]
-- (Summarize any other important details here.)
+- [Any other relevant information, summarized concisely.]
 </source_summary>
-
-<source_summary url="[URL of second result]" title="[Title of second result]" date="[Date of second result]">
-### Key Points from "[Title of second result]":
-- [Key information from the second source.]
-- [Specific data or quotes found in this source.]
-</source_summary>
-
 </structured_data>
 
 ## EXAMPLE:
@@ -281,20 +306,10 @@ You MUST respond with ONLY the `<structured_data>` format. Do not add any commen
 **USER QUERY:** "What are the performance specs of the 2024 Porsche 911 GT3 RS?"
 
 **RAW SCRAPED DATA:**
-<result url="porsche.com/gt3rs" date="2024-01-15"><title>Porsche 911 GT3 RS Official Page</title><content>...tons of marketing text... The 4.0-liter high-revving naturally aspirated engine produces 518 hp... reaches 60 mph in 3.0 seconds... top speed is 184 mph. ...more marketing...</content></result>
 <result url="caranddriver.com/reviews" date="2024-02-20"><title>Review: 2024 Porsche 911 GT3 RS</title><content>...review text... We tested the 0-60 time and got a blistering 2.9 seconds. The engine, a flat-six, makes 518 horsepower and torque is 342 lb-ft. ...text about the wing...</content></result>
 
 **YOUR RESPONSE:**
 <structured_data>
-
-<source_summary url="porsche.com/gt3rs" title="Porsche 911 GT3 RS Official Page" date="2024-01-15">
-### Key Points from "Porsche 911 GT3 RS Official Page":
-- Engine: 4.0-liter high-revving naturally aspirated.
-- Horsepower: 518 hp.
-- 0-60 mph: 3.0 seconds.
-- Top Speed: 184 mph.
-</source_summary>
-
 <source_summary url="caranddriver.com/reviews" title="Review: 2024 Porsche 911 GT3 RS" date="2024-02-20">
 ### Key Points from "Review: 2024 Porsche 911 GT3 RS":
 - 0-60 mph (tested): 2.9 seconds.
@@ -302,10 +317,8 @@ You MUST respond with ONLY the `<structured_data>` format. Do not add any commen
 - Horsepower: 518 hp.
 - Torque: 342 lb-ft.
 </source_summary>
-
 </structured_data>
 """
-
 
 # --- MAIN SEARCH AGENT SYSTEM PROMPT ---
 MAIN_SEARCH_PROMPT = """You are a web search AI assistant. You have access to real-time web search and should use it intelligently. You will be given a user's query and a semantically relevant chat history.
@@ -379,7 +392,41 @@ class SearchWorker(QThread):
         self.validator_messages = [{'role': 'system', 'content': VALIDATOR_PROMPT}]
         self.refiner_messages = [{'role': 'system', 'content': REFINER_PROMPT}]
         self.abstraction_messages = [{'role': 'system', 'content': ABSTRACTION_PROMPT}]
+        # --- NEW: NARRATOR AGENT ---
+        self.narrator_messages = [{'role': 'system', 'content': NARRATOR_PROMPT}]
 
+    # --- NEW: NARRATOR AGENT METHOD ---
+    def _narrate_step(self, current_action_description: str):
+        """Calls the narrator agent to comment on the current step."""
+        # To prevent the context from growing indefinitely, keep only the last 4 messages (2 turns)
+        if len(self.narrator_messages) > 5: # System prompt + 2 pairs
+            self.narrator_messages = [self.narrator_messages[0]] + self.narrator_messages[-4:]
+
+        prompt = f"""## Your Previous Thoughts:
+{chr(10).join(f"- {m['content']}" for m in self.narrator_messages if m['role'] == 'assistant')}
+
+## Current Action:
+{current_action_description}
+"""
+        messages_for_narrator = self.narrator_messages + [{'role': 'user', 'content': prompt}]
+
+        try:
+            response = ollama.chat(model='qwen2.5:7b', messages=messages_for_narrator, stream=False)
+            narration = response['message']['content'].strip()
+            
+            # Simple cleanup for common LLM artifacts
+            narration = re.sub(r'["\']', '', narration) # remove quotes
+            if not narration.endswith(('.', '!', '?')):
+                narration += '.' # ensure it ends with punctuation
+
+            # Log the narration
+            self.log_message.emit(narration, "NARRATOR")
+            
+            # Add the assistant's response to its own history for context
+            self.narrator_messages.append({'role': 'assistant', 'content': narration})
+        except Exception as e:
+            # Don't crash the whole process if the narrator fails. Just log it.
+            self.log_message.emit(f"Narrator agent failed: {e}", "WARN")
 
     def _get_search_plan(self, user_query: str) -> str:
         """Calls the Search Intent Agent to decompose the user query, now WITH conversational context."""
@@ -439,39 +486,111 @@ class SearchWorker(QThread):
         except Exception as e:
             self.log_message.emit(f"RefinerAgent Failed: {e}. Cannot refine search.", "ERROR")
             return []
-            
-    def _structure_scraped_data(self, user_query: str, raw_scraped_data: str) -> str:
-        """Calls the Data Abstraction Agent to process and structure raw scraped content."""
-        self.log_message.emit("Calling AbstractionAgent to structure and summarize data...", "AGENT_CALL")
+    
+    # --- BATCH-BASED Abstraction Agent Method ---
+    def _structure_scraped_data_batch(self, user_query: str, raw_scraped_results: List[str]) -> str:
+        """
+        Calls the Abstraction Agent for each scraped result INDIVIDUALLY and combines the structured outputs.
+        """
+        self.log_message.emit(f"Calling AbstractionAgent in batch mode for {len(raw_scraped_results)} sources...", "AGENT_CALL")
         self.progress.emit("Abstracting key information...")
         
-        abstraction_task_prompt = f"""ORIGINAL USER QUERY: {user_query}
+        all_structured_summaries = []
         
-        RAW SCRAPED DATA:
-        {raw_scraped_data}
-        """
-        try:
-            messages = self.abstraction_messages + [{'role': 'user', 'content': abstraction_task_prompt}]
-            response = ollama.chat(model='qwen3:8b', messages=messages, stream=False)
-            structured_output = response['message']['content'].strip()
+        for i, result_str in enumerate(raw_scraped_results):
+            self.log_message.emit(f"Abstracting source {i+1}/{len(raw_scraped_results)}...", "INFO")
             
-            match = re.search(r'<structured_data>(.*?)</structured_data>', structured_output, re.DOTALL)
-            if match:
-                clean_structured_data = match.group(1).strip()
-                self.log_message.emit("AbstractionAgent successfully structured the data.", "INFO")
-                self.log_message.emit(f"STRUCTURED DATA:\n{clean_structured_data}", "PAYLOAD")
-                return clean_structured_data
-            else:
-                self.log_message.emit("AbstractionAgent response did not contain valid <structured_data> tags. Falling back to raw data.", "WARN")
-                return raw_scraped_data
+            abstraction_task_prompt = f"""ORIGINAL USER QUERY: {user_query}
+            
+            RAW SCRAPED DATA:
+            {result_str}
+            """
+            
+            try:
+                messages = self.abstraction_messages + [{'role': 'user', 'content': abstraction_task_prompt}]
+                response = ollama.chat(model='qwen3:8b', messages=messages, stream=False)
+                structured_output = response['message']['content'].strip()
+                
+                match = re.search(r'<structured_data>(.*?)</structured_data>', structured_output, re.DOTALL)
+                if match:
+                    clean_structured_data = match.group(1).strip()
+                    all_structured_summaries.append(clean_structured_data)
+                    self.log_message.emit(f"Source {i+1} successfully structured.", "INFO")
+                else:
+                    self.log_message.emit(f"Source {i+1} response did not contain valid <structured_data> tags. Skipping.", "WARN")
+                    self.log_message.emit(f"INVALID ABSTRACTION PAYLOAD:\n{structured_output}", "PAYLOAD")
 
-        except Exception as e:
-            self.log_message.emit(f"AbstractionAgent failed: {e}. Falling back to raw data.", "ERROR")
-            return raw_scraped_data
+            except Exception as e:
+                self.log_message.emit(f"AbstractionAgent failed for source {i+1}: {e}. Skipping.", "ERROR")
+
+        if not all_structured_summaries:
+            self.log_message.emit("AbstractionAgent failed to structure any data. Falling back to raw data.", "ERROR")
+            return "\n".join(raw_scraped_results)
+        
+        final_combined_summary = "\n\n".join(all_structured_summaries)
+        self.log_message.emit(f"Abstraction complete. {len(all_structured_summaries)}/{len(raw_scraped_results)} sources successfully summarized.", "INFO")
+        self.log_message.emit(f"FINAL STRUCTURED DATA:\n{final_combined_summary}", "PAYLOAD")
+        return final_combined_summary
+
+    # --- BATCH-BASED Validator Agent Method ---
+    def _validate_scraped_content_batch(self, user_query: str, scraped_content_list: List[str]) -> Tuple[List[str], List[str]]:
+        """
+        Validates each piece of scraped content individually against the user query.
+        Returns a tuple containing a list of PASSED content and a list of FAILURE reasons.
+        """
+        self.log_message.emit(f"Calling ValidatorAgent in batch mode for {len(scraped_content_list)} sources...", "AGENT_CALL")
+        
+        passed_content = []
+        failure_reasons = []
+
+        if not scraped_content_list:
+            return [], []
+
+        for i, content in enumerate(scraped_content_list):
+            self.progress.emit(f"Validating source {i+1}/{len(scraped_content_list)}...")
+            
+            url_match = re.search(r'<result url="([^"]+)"', content)
+            title_match = re.search(r'<title>(.*?)</title>', content, re.DOTALL)
+            source_url = url_match.group(1) if url_match else "Unknown URL"
+            source_title = title_match.group(1).strip() if title_match else "Unknown Title"
+
+            validation_prompt = f"USER'S GOAL: {user_query}\n\nCONTENT TO CHECK:\n{content}"
+            
+            try:
+                validator_messages = self.validator_messages + [{'role': 'user', 'content': validation_prompt}]
+                response = ollama.chat(model='qwen3:14b', messages=validator_messages, stream=False)
+                validator_output = response['message']['content'].strip()
+                
+                # --- THE FIX: LOG THE RAW OUTPUT EVERY SINGLE TIME, UNCONDITIONALLY ---
+                self.log_message.emit(f"--- VALIDATOR RAW OUTPUT FOR '{source_title}' ---\n{validator_output}", "PAYLOAD")
+
+                output_lower = validator_output.lower()
+
+                if '<pass>' in output_lower:
+                    passed_content.append(content)
+                    self.log_message.emit(f"Source {i+1} PARSED AS: PASS", "INFO")
+                elif '<fail>' in output_lower:
+                    fail_match = re.search(r'<fail>(.*?)</fail>', validator_output, re.IGNORECASE | re.DOTALL)
+                    reason = fail_match.group(1).strip() if fail_match else "Reason not specified."
+                    failure_reasons.append(f"{source_title}: {reason}")
+                    self.log_message.emit(f"Source {i+1} PARSED AS: FAIL ({reason})", "WARN")
+                else:
+                    reason = "Ambiguous (No <pass> or <fail> tag found)"
+                    failure_reasons.append(f"{source_title}: {reason}")
+                    self.log_message.emit(f"Source {i+1} PARSED AS: AMBIGUOUS", "WARN")
+                    
+            except Exception as e:
+                reason = f"Validator agent call failed: {e}"
+                failure_reasons.append(f"{source_title}: {reason}")
+                self.log_message.emit(f"Source {i+1} FAILED ({source_title}) due to an error: {e}", "ERROR")
+
+        self.log_message.emit(f"Validation complete: {len(passed_content)}/{len(scraped_content_list)} sources passed.", "STEP")
+        return passed_content, failure_reasons
 
     def run(self):
         try:
             self.log_message.emit("New Request Started", "STEP")
+            self._narrate_step(f"A new request has been initiated for the user's query: '{self.prompt[:80]}...'")
             
             sources_used_for_synthesis = []
             final_response = ""
@@ -481,13 +600,13 @@ class SearchWorker(QThread):
             if self.force_search:
                 self.log_message.emit("Force Search mode enabled. Bypassing model's search decision.", "STEP")
                 self.progress.emit("Forcing search plan generation...")
+                self._narrate_step("The user has enabled Force Search. I'm skipping the decision-making and going straight to creating a search plan.")
                 search_plan = self._get_search_plan(self.prompt)
                 if search_plan:
                     topics = re.findall(r'<topic>(.*?)</topic>', search_plan, re.DOTALL)
                     if topics:
                         search_requests = [(topic.strip(), None) for topic in topics]
                         self.log_message.emit(f"Forced plan parsed into {len(search_requests)} search operations.", "INFO")
-                        # Do not modify self.prompt here, keep it as the original user query
                     else:
                         self.log_message.emit("Plan was generated but no topics found. Using original prompt as fallback.", "WARN")
                         search_requests = [(self.prompt, None)]
@@ -496,6 +615,7 @@ class SearchWorker(QThread):
                     search_requests = [(self.prompt, None)]
             else:
                 self.log_message.emit("Standard mode: Letting model decide if search is needed.", "STEP")
+                self._narrate_step("I'm analyzing the query to see if a web search is the best approach or if I can answer from my own knowledge.")
                 system_message = self.main_messages[0]
                 relevant_history = self.memory.retrieve_relevant_messages(self.prompt, top_k=3, last_n=2)
                 
@@ -519,6 +639,7 @@ class SearchWorker(QThread):
             if search_requests:
                 search_basis = 'forced plan' if self.force_search else 'model analysis'
                 self.log_message.emit(f"Performing targeted search based on {search_basis}.", "STEP")
+                self._narrate_step(f"A search is required. I'm now executing the search plan with {len(search_requests)} topic(s).")
 
                 system_message = self.main_messages[0]
                 relevant_history = self.memory.retrieve_relevant_messages(self.prompt, top_k=3, last_n=2)
@@ -535,8 +656,9 @@ class SearchWorker(QThread):
                 
                 scraped_content, sources_from_search = self.execute_search_plan(search_requests)
 
-                if not scraped_content.strip():
+                if not scraped_content:
                     self.log_message.emit("Search returned no usable content. Responding with available knowledge.", "WARN")
+                    self._narrate_step("The web search came up empty. I'll have to answer based on what I already know.")
                     prompt_for_no_search = "The web search failed to return any content. Please answer the user's last question using only your existing knowledge, without mentioning the failed search."
                     messages_for_fallback = messages_for_planning + [
                         {'role': 'assistant', 'content': initial_model_response},
@@ -545,25 +667,26 @@ class SearchWorker(QThread):
                     final_response = self.get_ollama_response(messages=messages_for_fallback)
                 else:
                     self.progress.emit("Validating search results...")
-                    validation_result = self.validate_scraped_content(self.prompt, scraped_content)
+                    self._narrate_step(f"I've got {len(scraped_content)} potential sources. Now I need to check if they're actually relevant.")
+                    passed_content, failure_reasons = self._validate_scraped_content_batch(self.prompt, scraped_content)
                     
-                    if validation_result == "pass":
-                        self.log_message.emit("Validator: Content passed relevance check.", "INFO")
-                        
-                        structured_data = self._structure_scraped_data(self.prompt, scraped_content)
+                    if passed_content:
+                        self._narrate_step(f"Validation complete. {len(passed_content)} source(s) look promising, so I'll extract the key details now.")
+                        structured_data = self._structure_scraped_data_batch(self.prompt, passed_content)
                         self.progress.emit("Synthesizing validated response...")
+                        self._narrate_step("With the relevant information extracted and structured, I'm ready to compose the final answer.")
                         
                         sources_used_for_synthesis.extend(sources_from_search)
                         
                         synthesis_prompt = f"""
                         <think>
-                        The search was successful, validated, and the data has been structured. I will now synthesize this data to directly answer the user's specific query.
+                        The search was successful, and {len(passed_content)} sources were validated as relevant. The data has been structured. I will now synthesize this data to directly answer the user's specific query.
                         </think>
                         
                         <task>
                         <user_query>{self.prompt}</user_query>
                         <instructions>
-                        You MUST use the provided structured data summary to construct a direct and complete answer to the `user_query` above. Do not deviate. Synthesize the information from all sources into a cohesive response and include citations.
+                        You MUST use the provided structured data summary to construct a direct and complete answer to the `user_query` above. Synthesize the information from all sources into a cohesive response.
                         </instructions>
                         </task>
                         
@@ -582,18 +705,19 @@ class SearchWorker(QThread):
                         if additional_query:
                             self.log_message.emit(f"Model requested additional search for: '{additional_query}'", "STEP")
                             self.progress.emit("Performing additional search requested by model...")
+                            self._narrate_step("The initial results weren't quite enough. I'm performing a follow-up search to get more specific details.")
                             
                             additional_scraped_content, sources_from_add_search = self.execute_search_plan([(additional_query, None)])
 
-                            if additional_scraped_content and additional_scraped_content.strip():
+                            if additional_scraped_content:
                                 self.progress.emit("Validating additional search results...")
-                                additional_validation = self.validate_scraped_content(self.prompt, additional_scraped_content)
+                                passed_additional_content, _ = self._validate_scraped_content_batch(self.prompt, additional_scraped_content)
 
-                                if additional_validation == "pass":
+                                if passed_additional_content:
                                     self.log_message.emit("Validator: Additional search content passed.", "INFO")
                                     
-                                    combined_raw_data = scraped_content + "\n\n" + additional_scraped_content
-                                    final_structured_data = self._structure_scraped_data(self.prompt, combined_raw_data)
+                                    combined_raw_data = passed_content + passed_additional_content
+                                    final_structured_data = self._structure_scraped_data_batch(self.prompt, combined_raw_data)
                                     self.progress.emit("Synthesizing final response with all data...")
                                     sources_used_for_synthesis.extend(sources_from_add_search)
                                     
@@ -636,11 +760,13 @@ class SearchWorker(QThread):
                         else:
                             final_response = synthesis_response_1
                     else: 
-                        self.log_message.emit(f"Validator: Content FAILED: {validation_result}", "WARN")
+                        combined_failure_reasons = "; ".join(failure_reasons)
+                        self.log_message.emit(f"All sources FAILED validation. Reasons: {combined_failure_reasons}", "WARN")
                         self.progress.emit("Content failed validation, attempting intelligent refinement...")
+                        self._narrate_step("None of the initial results were good enough. I need to rethink my search strategy and try again with a better query.")
                         
                         failed_query = search_requests[0][0]
-                        refined_plan_queries = self._get_refined_search_plan(failed_query, validation_result)
+                        refined_plan_queries = self._get_refined_search_plan(failed_query, combined_failure_reasons)
                         
                         refined_content_found = False
                         if refined_plan_queries:
@@ -649,11 +775,11 @@ class SearchWorker(QThread):
                                 refined_content, sources_from_refined = self.execute_search_plan([refined_search])
                                 
                                 if refined_content:
-                                    refined_validation = self.validate_scraped_content(self.prompt, refined_content)
-                                    if refined_validation == "pass":
+                                    passed_refined_content, _ = self._validate_scraped_content_batch(self.prompt, refined_content)
+                                    if passed_refined_content:
                                         self.log_message.emit("Validator: Refined search content PASSED.", "INFO")
                                         
-                                        refined_structured_data = self._structure_scraped_data(self.prompt, refined_content)
+                                        refined_structured_data = self._structure_scraped_data_batch(self.prompt, passed_refined_content)
                                         self.progress.emit("Synthesizing refined response...")
                                         sources_used_for_synthesis.extend(sources_from_refined)
                                         
@@ -682,12 +808,13 @@ class SearchWorker(QThread):
                                         refined_content_found = True
                                         break 
                                     else:
-                                        self.log_message.emit(f"Validator: Refined attempt {i+1} also FAILED: {refined_validation}", "WARN")
+                                        self.log_message.emit(f"Validator: Refined attempt {i+1} also FAILED validation.", "WARN")
                                 else:
                                      self.log_message.emit(f"Refined attempt {i+1} yielded no content.", "WARN")
                         
                         if not refined_content_found:
                             self.log_message.emit("All primary and refined search attempts failed.", "ERROR")
+                            self._narrate_step("My search attempts, even the refined ones, have failed to find good information. I'll have to inform the user and use my own knowledge.")
                             prompt_for_failed_search = "Both the primary and refined web searches failed to return useful content. Please inform the user that you couldn't find relevant information online and answer their last question using only your existing knowledge."
                             messages_for_final_fallback = messages_for_planning + [
                                 {'role': 'assistant', 'content': initial_model_response},
@@ -697,11 +824,13 @@ class SearchWorker(QThread):
             else:
                 self.progress.emit("Responding with existing knowledge...")
                 self.log_message.emit("Model determined no search needed. Using existing knowledge.", "STEP")
+                self._narrate_step("A web search isn't necessary for this query. I'll generate a response from my internal knowledge base.")
                 final_response = initial_model_response
 
             final_response_with_sources = self._attach_sources_to_response(final_response, sources_used_for_synthesis)
 
             self.log_message.emit("Request Completed", "STEP")
+            self._narrate_step("The final answer has been assembled and sent. My work here is done.")
             self.finished.emit(final_response_with_sources)
 
         except Exception as e:
@@ -710,8 +839,8 @@ class SearchWorker(QThread):
             self.log_message.emit(error_str, "ERROR")
             self.error.emit(str(e))
 
-    def execute_search_plan(self, search_requests: List[Tuple[str, str]]) -> Tuple[str, List[Dict]]:
-        """Execute search plan and return content string and a list of source dicts."""
+    def execute_search_plan(self, search_requests: List[Tuple[str, str]]) -> Tuple[List[str], List[Dict]]:
+        """Execute search plan and return a list of content strings and a list of source dicts."""
         all_scraped_content = []
         all_sources = []
         
@@ -719,24 +848,24 @@ class SearchWorker(QThread):
             self.progress.emit(f"Searching for '{query}'...")
             self.log_message.emit(f"Executing search: '{query}'" + (f" on '{domain}'" if domain else ""), "INFO")
             
-            content, success_count, source_quality, sources = self.perform_single_search_and_scrape(query, domain)
+            content_list, success_count, source_quality, sources = self.perform_single_search_and_scrape(query, domain)
             
             if success_count == 0 and domain:
                 self.log_message.emit(f"Domain-specific search failed. Attempting broader search.", "WARN")
                 self.progress.emit(f"Broadening search scope...")
-                content, success_count, source_quality, sources = self.perform_single_search_and_scrape(query, domain=None)
+                content_list, success_count, source_quality, sources = self.perform_single_search_and_scrape(query, domain=None)
                 self.log_message.emit(f"Fallback completed: {success_count} sources, quality: {source_quality}", "INFO")
             elif success_count > 0:
                 self.log_message.emit(f"Search successful: {success_count} sources, quality: {source_quality}", "INFO")
             
-            if content.strip():
-                all_scraped_content.append(content)
+            if content_list:
+                all_scraped_content.extend(content_list)
                 all_sources.extend(sources)
                 
-        return "\n\n".join(all_scraped_content), all_sources
+        return all_scraped_content, all_sources
 
-    def perform_single_search_and_scrape(self, query: str, domain: str = None) -> Tuple[str, int, str, List[Dict]]:
-        """Performs a search and returns content, count, quality, and a list of source dicts."""
+    def perform_single_search_and_scrape(self, query: str, domain: str = None) -> Tuple[List[str], int, str, List[Dict]]:
+        """Performs a search and returns a list of content strings, count, quality, and a list of source dicts."""
         try:
             search_q = f"{query} site:{domain}" if domain else query
             self.log_message.emit(f"Searching with DDGS: '{search_q}'", "INFO")
@@ -746,13 +875,13 @@ class SearchWorker(QThread):
             
             if not search_results:
                 self.log_message.emit(f"No results found for: '{search_q}'", "WARN")
-                return "", 0, "none", []
+                return [], 0, "none", []
 
             ranked_urls = self.rank_urls_by_quality(search_results, query.lower())
             
             if not ranked_urls:
                 self.log_message.emit("No quality URLs found after ranking", "WARN")
-                return "", 0, "poor", []
+                return [], 0, "poor", []
 
             urls_to_scrape = ranked_urls[:self.MAX_SOURCES_TO_SCRAPE]
             self.log_message.emit(f"Selected {len(urls_to_scrape)} top sources from {len(ranked_urls)} candidates.", "INFO")
@@ -781,11 +910,11 @@ class SearchWorker(QThread):
             elif success_count >= 1 and total_content_length > 300: quality = "fair"
 
             self.log_message.emit(f"Search Quality: {quality} ({total_content_length} chars from {success_count}/{len(urls_to_scrape)} sources).", "INFO")
-            return "\n".join(scraped_results_content), success_count, quality, scraped_sources_list
+            return scraped_results_content, success_count, quality, scraped_sources_list
             
         except Exception as e:
             self.log_message.emit(f"Search failed for '{query}': {e}", "ERROR")
-            return f"<e>Search failed: {e}</e>", 0, "error", []
+            return [], 0, "error", []
 
     def rank_urls_by_quality(self, search_results: List[Dict], query: str) -> List[Tuple[str, float]]:
         """CRITICAL: Intelligent URL ranking for different query types"""
@@ -849,7 +978,7 @@ class SearchWorker(QThread):
 
         content_length = len(main_content)
         if content_length < 300: return f"<result url='{url}' title='{title}' date='{date}' error='Content below quality threshold'></result>", False, 0, {}
-        if content_length > 4000: main_content = main_content[:4000] + "..."
+        if content_length > 8000: main_content = main_content[:8000] + "..." #here is where you can set the total scraped data 
         
         formatted_string = f"""<result url="{url}" date="{date}"><title>{title}</title><content>{main_content}</content></result>"""
         source_info = {'url': url, 'title': title, 'date': date}
@@ -876,75 +1005,87 @@ class SearchWorker(QThread):
             if text.strip() == match.group(0).strip() and len(query) > 3: return query
         return ""
 
-    def validate_scraped_content(self, user_query: str, scraped_content: str) -> str:
-        """Validator agent to check content relevance with improved parsing and logging."""
-        self.log_message.emit("Running ValidatorAgent on scraped content...", "AGENT_CALL")
-        validation_prompt = f"USER QUERY: {user_query}\n\nSCRAPED CONTENT TO VALIDATE:\n{scraped_content}"
-        try:
-            validator_messages = self.validator_messages + [{'role': 'user', 'content': validation_prompt}]
-            response = ollama.chat(model='qwen3:8b', messages=validator_messages, stream=False)
-            validator_output = response['message']['content'].strip()
-            
-            output_lower = validator_output.lower()
-            if output_lower.startswith('<pass>'):
-                return "pass"
-            elif output_lower.startswith('<fail>'):
-                fail_match = re.search(r'<fail>(.*?)</fail>', validator_output, re.IGNORECASE | re.DOTALL)
-                return fail_match.group(1).strip() if fail_match else "Content failed validation"
-            else:
-                self.log_message.emit("Validator response was ambiguous. Defaulting to pass.", "WARN")
-                self.log_message.emit(f"AMBIGUOUS VALIDATOR OUTPUT:\n{validator_output}", "PAYLOAD")
-                return "pass"
-                
-        except Exception as e:
-            self.log_message.emit(f"Validator agent failed: {e}. Defaulting to pass.", "ERROR")
-            return "pass"
-
     def get_ollama_response(self, messages: list) -> str:
-        """Get response from the main Ollama model using a list of messages."""
+        """Get response from the main Ollama model, enforcing the presence of a <think> block with auto-retry."""
         model_name = 'qwen3:14b'
-        
-        system_prompt = messages[0]['content']
-        history_messages = messages[1:-1]
-        final_task = messages[-1]['content']
+        max_retries = 2  # Original attempt + 2 retries
 
-        log_payload = "--- PAYLOAD BEING SENT TO MODEL ---\n"
-        log_payload += f"\n[SYSTEM PROMPT]:\n\"{system_prompt[:250].strip().replace(chr(10), ' ')}...\"\n"
-        log_payload += "\n[SEMANTIC HISTORY RETRIEVED]:\n"
-        if history_messages:
-            for msg in history_messages:
-                role = msg.get('role', 'N/A').upper()
-                content = msg.get('content', '').strip().replace('\n', '\\n')
-                log_payload += f"  - [{role}]: {content[:120] + '...' if len(content) > 120 else content}\n"
-        else:
-            log_payload += "  (None)\n"
-        log_payload += "\n[CURRENT USER TASK]:\n"
-        log_payload += f"\"{final_task.strip().replace(chr(10), ' ')}\"\n"
-        log_payload += "--- END OF PAYLOAD ---\n"
-        self.log_message.emit(log_payload, "PAYLOAD")
+        current_messages = list(messages)
+
+        for attempt in range(max_retries + 1):
+            system_prompt = current_messages[0]['content']
+            history_messages = current_messages[1:-1]
+            final_task = current_messages[-1]['content']
+
+            log_payload = "--- PAYLOAD BEING SENT TO MODEL ---\n"
+            log_payload += f"\n[SYSTEM PROMPT]:\n\"{system_prompt[:250].strip().replace(chr(10), ' ')}...\"\n"
+            log_payload += "\n[SEMANTIC HISTORY RETRIEVED]:\n"
+            if history_messages:
+                for msg in history_messages:
+                    role = msg.get('role', 'N/A').upper()
+                    content = msg.get('content', '').strip().replace('\n', '\\n')
+                    log_payload += f"  - [{role}]: {content[:120] + '...' if len(content) > 120 else content}\n"
+            else:
+                log_payload += "  (None)\n"
+            log_payload += "\n[CURRENT USER TASK]:\n"
+            log_payload += f"\"{final_task.strip().replace(chr(10), ' ')}\"\n"
+            log_payload += "--- END OF PAYLOAD ---\n"
+            self.log_message.emit(log_payload, "PAYLOAD")
+            
+            self.log_message.emit(f"Requesting response from {model_name} (Attempt {attempt + 1}/{max_retries + 1})...", "INFO")
+            try:
+                response = ollama.chat(model=model_name, messages=current_messages, stream=False)
+                response_content = response['message']['content']
+                
+                # --- VALIDATION STEP ---
+                if '<think>' in response_content and '</think>' in response_content:
+                    self.log_message.emit(f"{model_name} response received and validated for <think> block.", "INFO")
+                    return response_content
+                else:
+                    self.log_message.emit(f"Validation FAILED: <think> block missing in response (Attempt {attempt + 1}).", "WARN")
+                    if attempt < max_retries:
+                        # Add the failed response and a correction prompt for the next attempt
+                        correction_prompt = {
+                            'role': 'user',
+                            'content': "Your previous response was invalid because it did not contain the mandatory `<think>...</think>` block explaining your reasoning. You MUST include this block in your response. Please correct this and reply again."
+                        }
+                        # We add the model's failed attempt to the history so it knows what it did wrong
+                        current_messages.append({'role': 'assistant', 'content': response_content}) 
+                        current_messages.append(correction_prompt)
+                        self.log_message.emit("Retrying with correction prompt...", "STEP")
+                    else:
+                        self.log_message.emit(f"Max retries reached. Forcing a <think> block into the response.", "ERROR")
+                        # Prepend a think block to satisfy the UI and indicate the failure
+                        return f"<think>GENERATION FAILURE: Model failed to produce a valid thinking process after {max_retries + 1} attempts.</think>\n{response_content}"
+
+            except Exception as e:
+                self.log_message.emit(f"{model_name} request failed on attempt {attempt + 1}: {e}", "ERROR")
+                if attempt == max_retries:
+                    # If all retries fail due to exceptions, raise the last one
+                    raise
         
-        self.log_message.emit(f"Requesting response from {model_name} with {len(messages)} messages in context...", "INFO")
-        try:
-            response = ollama.chat(model=model_name, messages=messages, stream=False)
-            self.log_message.emit(f"{model_name} response received.", "INFO")
-            return response['message']['content']
-        except Exception as e:
-            self.log_message.emit(f"{model_name} request failed: {e}", "ERROR")
-            raise
+        # This part should ideally not be reached, but as a fallback
+        return "<think>An unexpected error occurred in the generation loop.</think>Error: Could not get a valid response from the model."
 
     def _attach_sources_to_response(self, response_text: str, sources: List[Dict]) -> str:
-        """Deterministically attaches a <sources> block to the response."""
-        if not sources: return response_text
+        """Deterministically attaches a <sources> block to the response if sources exist."""
+        if not sources:
+            return response_text
+        
+        # Remove any hallucinated <sources> block from the LLM's response
         clean_response = re.sub(r'<sources>.*?</sources>', '', response_text, flags=re.DOTALL).strip()
+        
+        # Build the new, definitive sources block from actual scraped data
         sources_lines = [f'<source url="{s["url"]}" date="{s["date"]}">{s["title"]}</source>' for s in sources]
         sources_block = "<sources>\n" + "\n".join(sources_lines) + "\n</sources>"
+        
         return f"{clean_response}\n\n{sources_block}"
 
 class CustomTitleBar(QWidget):
     def __init__(self, parent):
         super().__init__(parent); self.parent = parent; self.pressing = False; self.setObjectName("customTitleBar")
         layout = QHBoxLayout(self); layout.setContentsMargins(10, 0, 0, 0); layout.setSpacing(10)
-        self.title = QLabel("Web.ai"); self.title.setObjectName("windowTitle"); layout.addWidget(self.title); layout.addStretch()
+        self.title = QLabel("Chorus.Ai"); self.title.setObjectName("windowTitle"); layout.addWidget(self.title); layout.addStretch()
         btn_size = 30
         self.minimize_button = QPushButton("—"); self.minimize_button.setObjectName("windowButton"); self.minimize_button.setFixedSize(btn_size, btn_size); self.minimize_button.clicked.connect(self.parent.showMinimized)
         self.maximize_button = QPushButton("□"); self.maximize_button.setObjectName("windowButton"); self.maximize_button.setFixedSize(btn_size, btn_size); self.maximize_button.clicked.connect(self.toggle_maximize)
@@ -1064,7 +1205,6 @@ class MessageBubble(QWidget):
             self.thinking_container.setVisible(False)
 
     def toggle_citations(self):
-        # --- FIX: Stop any existing animation to prevent race conditions on clear ---
         if self.citations_animation:
             self.citations_animation.stop()
 
@@ -1081,7 +1221,6 @@ class MessageBubble(QWidget):
         self.citations_animation.start()
 
     def toggle_thinking(self):
-        # --- FIX: Stop any existing animation to prevent race conditions on clear ---
         if self.thinking_animation:
             self.thinking_animation.stop()
 
@@ -1241,7 +1380,6 @@ class MainWindow(QMainWindow):
             #clearButton { background-color: #3C3C3C; color: #CCCCCC; border: 1px solid #555; padding: 4px 10px; border-radius: 4px; font-size: 12px; }
             #clearButton:hover { background-color: #4A4A4A; color: white; border-color: #666; }
 
-            /* --- SCROLLBAR STYLING FIX --- */
             QScrollBar:vertical { border: none; background: #252526; width: 10px; margin: 0; }
             QScrollBar::handle:vertical { background: #4A4A4A; border-radius: 5px; min-height: 25px; } 
             QScrollBar::handle:vertical:hover { background: #6A6A6A; }
@@ -1256,7 +1394,6 @@ class MainWindow(QMainWindow):
         """
 
     def clear_chat_session(self):
-        """Clears the semantic memory and the visual chat display."""
         self.memory.clear()
 
         while self.chat_layout.count() > 1:
@@ -1269,7 +1406,6 @@ class MainWindow(QMainWindow):
         self.input_field.setFocus()
 
     def send_message(self):
-        """Handles the main send action, checking the state of the force search toggle."""
         text = self.input_field.toPlainText().strip()
         if not text: return
             
@@ -1290,45 +1426,62 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def add_message_to_ui(self, text: str, is_user: bool):
-        """Adds a message bubble to the chat display, but does NOT save to memory."""
-        main_text, citations, thinking_text = text, None, None
+        # This function correctly creates the message bubble, separating the main content,
+        # the thinking process, and the sources.
+
+        # User messages are simple and don't have special blocks.
+        if is_user:
+            bubble = MessageBubble(text) # The first argument is always the main text.
+            bubble.container.setProperty("isUser", True)
         
-        if not is_user:
-            think_match = re.search(r'<think>(.*?)</think>', text, re.DOTALL)
+        # AI messages need to be parsed.
+        else:
+            working_text = text
+            thinking_text = None
+            citations = None
+
+            # 1. Find the <think> block, extract its content, and then REMOVE it from the working_text.
+            think_match = re.search(r'<think>(.*?)</think>', working_text, re.DOTALL)
             if think_match:
                 thinking_text = think_match.group(1).strip()
-                text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+                working_text = re.sub(r'<think>.*?</think>', '', working_text, flags=re.DOTALL).strip()
 
-            sources_match = re.search(r'<sources>(.*?)</sources>', text, re.DOTALL)
+            # 2. Find the <sources> block, extract its content, and then REMOVE it from the working_text.
+            sources_match = re.search(r'<sources>(.*?)</sources>', working_text, re.DOTALL)
             if sources_match:
                 sources_block = sources_match.group(1)
-                main_text = re.sub(r'<sources>.*?</sources>', '', text, flags=re.DOTALL).strip()
+                working_text = re.sub(r'<sources>.*?</sources>', '', working_text, flags=re.DOTALL).strip()
                 
+                # Parse the individual citations from the sources block.
                 citations_found = re.findall(r'<source url="([^"]+)" date="([^"]*)">(.*?)</source>', sources_block)
                 if citations_found:
                     citations = []
                     for url, date, title in citations_found:
-                        clean_title = title.strip()
-                        if not clean_title: clean_title = "Unknown Title"
+                        clean_title = title.strip() or "Unknown Title"
                         if len(clean_title) > 80: clean_title = clean_title[:77] + "..."
-                        citations.append({'url': url, 'date': date if date else "N/A", 'title': clean_title})
-            else:
-                main_text = text
-            
-            main_text = markdown2.markdown(main_text, extras=["fenced-code-blocks", "tables", "cuddled-lists"])
-        
-        bubble = MessageBubble(main_text if not is_user else text, citations=citations, thinking_text=thinking_text)
-        bubble.container.setProperty("isUser", is_user)
+                        citations.append({'url': url, 'date': date or "N/A", 'title': clean_title})
 
-        if not is_user: bubble.container.setMinimumWidth(650); bubble.container.setMaximumWidth(650)
+            # 3. Whatever text is left is the main message. Convert it to HTML for display.
+            main_content_html = markdown2.markdown(working_text, extras=["fenced-code-blocks", "tables", "cuddled-lists"])
+
+            # 4. Create the bubble, passing the three separated components to the constructor.
+            bubble = MessageBubble(main_content_html, citations=citations, thinking_text=thinking_text)
+            bubble.container.setProperty("isUser", False)
+            bubble.container.setMinimumWidth(650)
+            bubble.container.setMaximumWidth(650)
         
+        # This layout logic is the same for both user and AI bubbles.
         row_container = QWidget()
         row_layout = QHBoxLayout(row_container)
         row_layout.setContentsMargins(5, 5, 5, 5)
         row_layout.setSpacing(0)
         
-        if is_user: row_layout.addStretch(); row_layout.addWidget(bubble, 0, Qt.AlignTop)
-        else: row_layout.addWidget(bubble, 0, Qt.AlignTop); row_layout.addStretch()
+        if is_user: 
+            row_layout.addStretch()
+            row_layout.addWidget(bubble, 0, Qt.AlignTop)
+        else: 
+            row_layout.addWidget(bubble, 0, Qt.AlignTop)
+            row_layout.addStretch()
         
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, row_container)
         
@@ -1336,7 +1489,6 @@ class MainWindow(QMainWindow):
             self.chat_scroll.verticalScrollBar().maximum()))
 
     def handle_response(self, response: str, original_prompt: str):
-        """Handles a successful response from the worker."""
         self.add_message_to_ui(response, is_user=False)
         self.memory.add_message(role='user', content=original_prompt)
         self.memory.add_message(role='assistant', content=response)
@@ -1344,7 +1496,6 @@ class MainWindow(QMainWindow):
         self.update_log("Response delivered to UI.", "INFO")
 
     def handle_error(self, error: str, original_prompt: str):
-        """Handles an error from the worker."""
         error_msg = f"Error: {error}"
         self.add_message_to_ui(error_msg, is_user=False)
         self.memory.add_message(role='user', content=original_prompt)
@@ -1364,6 +1515,7 @@ class MainWindow(QMainWindow):
             "AGENT_CALL": "color: #C586C0; font-style: italic;",
             "MEMORY":     "color: #6A9955;",
             "USER":       "color: #007ACC; font-weight: bold;",
+            "NARRATOR":   "color: #569CD6; font-style: italic;",
             "PAYLOAD":    "color: #666666; border-left: 2px solid #444; padding-left: 8px; font-family: Consolas, 'Courier New', monospace; white-space: pre-wrap;"
         }
 

@@ -39,6 +39,11 @@ Think of it as your own **local, autonomous research team**: more accurate than 
 
 ---
 
+<img width="1100" height="750" alt="Screenshot 2025-09-18 120239" src="https://github.com/user-attachments/assets/74048279-2126-4088-ab89-2b4dbdfdbc59" />
+
+
+---
+
 ## Key Innovations
 
 -   **The Chorus of Agents:** This is not a monolithic AI. Chorus operates a sophisticated system where specialized AI agents collaborate to handle each stage of a request. This division of labor leads to more intelligent, robust, and reliable outcomes.

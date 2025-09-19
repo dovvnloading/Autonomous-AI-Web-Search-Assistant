@@ -44,7 +44,23 @@ Think of it as your own **local, autonomous research team**: more accurate than 
 
 ---
 
+<img width="1100" height="750" alt="Screenshot 2025-09-19 115835" src="https://github.com/user-attachments/assets/b37e5328-43e2-468b-8c73-9d3b2302fe4a" />
+
+---
+
+<img width="1100" height="750" alt="Screenshot 2025-09-19 120054" src="https://github.com/user-attachments/assets/302c1778-2fa9-485e-8688-8aa4ebbd2dc5" />
+
+
+---
+
+<img width="1100" height="750" alt="Screenshot 2025-09-19 120025" src="https://github.com/user-attachments/assets/d66a5a33-bebf-4a93-82f7-4c35d03957b2" />
+
+
+---
+
 ## Key Innovations
+
+-    **You can run this on a single 3090 with less than 16gb Ram!!**
 
 -   **The Chorus of Agents:** This is not a monolithic AI. Chorus operates a sophisticated system where specialized AI agents collaborate to handle each stage of a request. This division of labor leads to more intelligent, robust, and reliable outcomes.
 
@@ -94,7 +110,7 @@ Chorus's intelligence comes from a structured, multi-step workflow orchestrated 
 
 ## Getting Started
 
-Follow these instructions to get Chorus running on your local machine.
+Follow these instructions to get Chorus running on your local machine. 
 
 #### Prerequisites
 

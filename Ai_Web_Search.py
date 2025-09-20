@@ -209,15 +209,15 @@ class SearchWorker(QThread):
             self.narrator_messages = [self.narrator_messages[0]] + self.narrator_messages[-4:]
 
         prompt = f"""## Your Previous Thoughts:
-{chr(10).join(f"- {m['content']}" for m in self.narrator_messages if m['role'] == 'assistant')}
+        {chr(10).join(f"- {m['content']}" for m in self.narrator_messages if m['role'] == 'assistant')}
 
-## Current Action:
-{current_action_description}
-"""
+        ## Current Action:
+        {current_action_description}
+        """
         messages_for_narrator = self.narrator_messages + [{'role': 'user', 'content': prompt}]
 
         try:
-            response = ollama.chat(model='qwen2.5:7b', messages=messages_for_narrator, stream=False)
+            response = ollama.chat(model='qwen2.5:7b-instruct', messages=messages_for_narrator, stream=False)
             narration = response['message']['content'].strip()
             
             # Simple cleanup for common LLM artifacts
@@ -277,7 +277,7 @@ class SearchWorker(QThread):
         
         try:
             messages = self.refiner_messages + [{'role': 'user', 'content': refiner_prompt}]
-            response = ollama.chat(model='qwen3:8b', messages=messages, stream=False)
+            response = ollama.chat(model='qwen3:14b', messages=messages, stream=False)
             plan = response['message']['content'].strip()
             self.log_message.emit(f"RefinerAgent plan received:\n{plan}", "PAYLOAD")
             
@@ -365,9 +365,8 @@ class SearchWorker(QThread):
             try:
                 validator_messages = self.validator_messages + [{'role': 'user', 'content': validation_prompt}]
                 response = ollama.chat(model='qwen3:14b', messages=validator_messages, stream=False)
-                validator_output = response['message']['content'].strip()
+                validator_output = response['message']['content'].strip()                
                 
-                # --- THE FIX: LOG THE RAW OUTPUT EVERY SINGLE TIME, UNCONDITIONALLY ---
                 self.log_message.emit(f"--- VALIDATOR RAW OUTPUT FOR '{source_title}' ---\n{validator_output}", "PAYLOAD")
 
                 output_lower = validator_output.lower()
@@ -392,6 +391,16 @@ class SearchWorker(QThread):
 
         self.log_message.emit(f"Validation complete: {len(passed_content)}/{len(scraped_content_list)} sources passed.", "STEP")
         return passed_content, failure_reasons
+
+    def _filter_sources_by_passed_content(self, all_sources: List[Dict], passed_content_strings: List[str]) -> List[Dict]:
+        """Filters a list of source dictionaries to include only those whose content passed validation."""
+        passed_urls = set()
+        for content in passed_content_strings:
+            match = re.search(r'<result url="([^"]+)"', content)
+            if match:
+                passed_urls.add(match.group(1))
+        
+        return [source for source in all_sources if source.get('url') in passed_urls]
 
     def run(self):
         try:
@@ -447,6 +456,7 @@ class SearchWorker(QThread):
                 self.log_message.emit(f"Performing targeted search based on {search_basis}.", "STEP")
                 self._narrate_step(f"A search is required. I'm now executing the search plan with {len(search_requests)} topic(s).")
 
+                # Re-build message context for this stage of the process
                 system_message = self.main_messages[0]
                 relevant_history = self.memory.retrieve_relevant_messages(self.prompt, top_k=3, last_n=2)
                 sanitized_history = []
@@ -482,13 +492,12 @@ class SearchWorker(QThread):
                         self.progress.emit("Synthesizing validated response...")
                         self._narrate_step("With the relevant information extracted and structured, I'm ready to compose the final answer.")
                         
-                        sources_used_for_synthesis.extend(sources_from_search)
+                        passed_sources = self._filter_sources_by_passed_content(sources_from_search, passed_content)
+                        sources_used_for_synthesis.extend(passed_sources)
                         
-                        synthesis_prompt = f"""
-                        <think>
-                        The search was successful, and {len(passed_content)} sources were validated as relevant. The data has been structured. I will now synthesize this data to directly answer the user's specific query.
-                        </think>
-                        
+                        # --- SIMPLIFIED SYNTHESIS LOGIC ---
+                        # The SYNTHESIZER_PROMPT is now responsible for this step.
+                        synthesis_task_prompt = f"""
                         <task>
                         <user_query>{self.prompt}</user_query>
                         <instructions>
@@ -501,70 +510,16 @@ class SearchWorker(QThread):
                         </data>
                         """
                         
+                        # We build the context for the synthesizer
                         messages_for_synthesis = messages_for_planning + [
                             {'role': 'assistant', 'content': initial_model_response},
-                            {'role': 'user', 'content': synthesis_prompt}
+                            {'role': 'user', 'content': synthesis_task_prompt}
                         ]
-                        synthesis_response_1 = self.get_ollama_response(messages=messages_for_synthesis)
 
-                        additional_query = self.extract_additional_search(synthesis_response_1)
-                        if additional_query:
-                            self.log_message.emit(f"Model requested additional search for: '{additional_query}'", "STEP")
-                            self.progress.emit("Performing additional search requested by model...")
-                            self._narrate_step("The initial results weren't quite enough. I'm performing a follow-up search to get more specific details.")
-                            
-                            additional_scraped_content, sources_from_add_search = self.execute_search_plan([(additional_query, None)])
+                        # The response from this one synthesis step IS the final response. No more checks.
+                        final_response = self.get_ollama_response(messages=messages_for_synthesis)
+                        # --- END OF SIMPLIFIED LOGIC ---
 
-                            if additional_scraped_content:
-                                self.progress.emit("Validating additional search results...")
-                                passed_additional_content, _ = self._validate_scraped_content_batch(self.prompt, additional_scraped_content)
-
-                                if passed_additional_content:
-                                    self.log_message.emit("Validator: Additional search content passed.", "INFO")
-                                    
-                                    combined_raw_data = passed_content + passed_additional_content
-                                    final_structured_data = self._structure_scraped_data_batch(self.prompt, combined_raw_data)
-                                    self.progress.emit("Synthesizing final response with all data...")
-                                    sources_used_for_synthesis.extend(sources_from_add_search)
-                                    
-                                    final_synthesis_prompt = f"""
-                                    <think>
-                                    My initial search was good, but an additional search was performed and also validated. I now have combined, structured data from all searches. I will synthesize this complete dataset to provide a comprehensive answer to the user's original query.
-                                    </think>
-                                    
-                                    <task>
-                                    <user_query>{self.prompt}</user_query>
-                                    <instructions>
-                                    You MUST use the provided COMBINED structured data summary to construct a final, direct, and complete answer to the `user_query` above. It is critical to synthesize information from ALL provided sources into a single, cohesive response.
-                                    </instructions>
-                                    </task>
-                                    
-                                    <data>
-                                    {final_structured_data}
-                                    </data>
-                                    """
-
-                                    messages_for_final_synthesis = messages_for_synthesis + [
-                                        {'role': 'assistant', 'content': synthesis_response_1},
-                                        {'role': 'user', 'content': final_synthesis_prompt}
-                                    ]
-                                    final_response = self.get_ollama_response(messages=messages_for_final_synthesis)
-                                else:
-                                    self.log_message.emit("Validator: Additional search content FAILED. Using initial results only.", "WARN")
-                                    fallback_prompt = f"""<think>I attempted an additional search for '{additional_query}', but the results were not relevant. I must now answer using only the initial structured data. I will answer the user's question as best I can with the information I have.</think>
-                                    INITIAL STRUCTURED DATA SUMMARY:{structured_data}
-                                    Instructions: Your additional search failed validation. Answer the user's question using ONLY the initial structured data summary provided above."""
-                                    messages_for_fallback = messages_for_synthesis + [{'role': 'assistant', 'content': synthesis_response_1}, {'role': 'user', 'content': fallback_prompt}]
-                                    final_response = self.get_ollama_response(messages=messages_for_fallback)
-                            else:
-                                self.log_message.emit("Additional search returned no content. Using initial results only.", "WARN")
-                                fallback_prompt = f"""<think>I attempted an additional search for '{additional_query}', but it returned no usable content. I must now answer using only the initial structured data. I will answer the user's question as best I can with the information I have.</think>
-                                INITIAL STRUCTURED DATA SUMMARY:{structured_data}
-                                Instructions: Your additional search failed to find anything. Answer the user's question using ONLY the initial structured data summary provided above."""
-                                messages_for_fallback = messages_for_synthesis + [{'role': 'assistant', 'content': synthesis_response_1}, {'role': 'user', 'content': fallback_prompt}]
-                                final_response = self.get_ollama_response(messages=messages_for_fallback)
-                        else:
-                            final_response = synthesis_response_1
                     else: 
                         combined_failure_reasons = "; ".join(failure_reasons)
                         self.log_message.emit(f"All sources FAILED validation. Reasons: {combined_failure_reasons}", "WARN")
@@ -587,13 +542,11 @@ class SearchWorker(QThread):
                                         
                                         refined_structured_data = self._structure_scraped_data_batch(self.prompt, passed_refined_content)
                                         self.progress.emit("Synthesizing refined response...")
-                                        sources_used_for_synthesis.extend(sources_from_refined)
+                                        
+                                        passed_refined_sources = self._filter_sources_by_passed_content(sources_from_refined, passed_refined_content)
+                                        sources_used_for_synthesis.extend(passed_refined_sources)
                                         
                                         refined_synthesis_prompt = f"""
-                                        <think>
-                                        The first search failed, but a refined search plan yielded better, validated, and structured results. I will use this new data to answer the user's original query.
-                                        </think>
-
                                         <task>
                                         <user_query>{self.prompt}</user_query>
                                         <instructions>
@@ -644,7 +597,6 @@ class SearchWorker(QThread):
             error_str = f"An error occurred: {e}\n{traceback.format_exc()}"
             self.log_message.emit(error_str, "ERROR")
             self.error.emit(str(e))
-
     def execute_search_plan(self, search_requests: List[Tuple[str, str]]) -> Tuple[List[str], List[Dict]]:
         """Execute search plan and return a list of content strings and a list of source dicts."""
         all_scraped_content = []
@@ -673,7 +625,17 @@ class SearchWorker(QThread):
     def perform_single_search_and_scrape(self, query: str, domain: str = None) -> Tuple[List[str], int, str, List[Dict]]:
         """Performs a search and returns a list of content strings, count, quality, and a list of source dicts."""
         try:
-            search_q = f"{query} site:{domain}" if domain else query
+            # --- START: AUTOMATIC DATE INJECTION ---
+            current_year = str(datetime.now().year)
+            # Inject the current year only if another year (e.g., 2023, 1995) isn't already in the query.
+            # This uses regex to check for a 4-digit number that looks like a year.
+            if not re.search(r'\b(19[89]\d|20\d{2})\b', query):
+                modified_query = f"{query} {current_year}"
+            else:
+                modified_query = query
+            # --- END: AUTOMATIC DATE INJECTION ---
+
+            search_q = f"{modified_query} site:{domain}" if domain else modified_query
             self.log_message.emit(f"Searching with DDGS: '{search_q}'", "INFO")
             
             with DDGS() as ddgs:
@@ -683,6 +645,7 @@ class SearchWorker(QThread):
                 self.log_message.emit(f"No results found for: '{search_q}'", "WARN")
                 return [], 0, "none", []
 
+            # Use the original, unmodified query to rank results, as it reflects the user's core intent.
             ranked_urls = self.rank_urls_by_quality(search_results, query.lower())
             
             if not ranked_urls:
@@ -784,7 +747,7 @@ class SearchWorker(QThread):
 
         content_length = len(main_content)
         if content_length < 300: return f"<result url='{url}' title='{title}' date='{date}' error='Content below quality threshold'></result>", False, 0, {}
-        if content_length > 8000: main_content = main_content[:8000] + "..." #here is where you can set the total scraped data 
+        if content_length > 12000: main_content = main_content[:12000] + "..." #here is where you can set the total scraped data 
         
         formatted_string = f"""<result url="{url}" date="{date}"><title>{title}</title><content>{main_content}</content></result>"""
         source_info = {'url': url, 'title': title, 'date': date}
@@ -802,27 +765,21 @@ class SearchWorker(QThread):
             valid_requests.append((query, domain))
         return valid_requests
 
-    def extract_additional_search(self, text: str) -> str:
-        """NEW: Extracts the query from an <additional_search> tag."""
-        pattern = r'<additional_search>\s*<query>(.*?)</query>\s*</additional_search>'
-        match = re.search(pattern, text.strip(), re.DOTALL | re.IGNORECASE)
-        if match:
-            query = match.group(1).strip()
-            if text.strip() == match.group(0).strip() and len(query) > 3: return query
-        return ""
 
     def get_ollama_response(self, messages: list) -> str:
-        """Get response from the main Ollama model, enforcing the presence of a <think> block with auto-retry."""
+        """
+        Get response from the main Ollama model, enforcing the presence of a <think> block
+        AND subsequent answer content, with an intelligent auto-retry mechanism.
+        """
         model_name = 'qwen3:14b'
         max_retries = 2  # Original attempt + 2 retries
-
         current_messages = list(messages)
 
         for attempt in range(max_retries + 1):
+            # --- (Logging payload code is the same, no changes needed here) ---
             system_prompt = current_messages[0]['content']
             history_messages = current_messages[1:-1]
             final_task = current_messages[-1]['content']
-
             log_payload = "--- PAYLOAD BEING SENT TO MODEL ---\n"
             log_payload += f"\n[SYSTEM PROMPT]:\n\"{system_prompt[:250].strip().replace(chr(10), ' ')}...\"\n"
             log_payload += "\n[SEMANTIC HISTORY RETRIEVED]:\n"
@@ -837,40 +794,49 @@ class SearchWorker(QThread):
             log_payload += f"\"{final_task.strip().replace(chr(10), ' ')}\"\n"
             log_payload += "--- END OF PAYLOAD ---\n"
             self.log_message.emit(log_payload, "PAYLOAD")
-            
+        
             self.log_message.emit(f"Requesting response from {model_name} (Attempt {attempt + 1}/{max_retries + 1})...", "INFO")
+        
             try:
                 response = ollama.chat(model=model_name, messages=current_messages, stream=False)
-                response_content = response['message']['content']
-                
-                # --- VALIDATION STEP ---
-                if '<think>' in response_content and '</think>' in response_content:
-                    self.log_message.emit(f"{model_name} response received and validated for <think> block.", "INFO")
+                response_content = response['message']['content'].strip()
+            
+                # --- NEW, MORE ROBUST VALIDATION ---
+                think_block_present = '<think>' in response_content and '</think>' in response_content
+            
+                # Check for any non-whitespace characters after the </think> tag.
+                main_content_present = bool(re.search(r'</think>\s*\S+', response_content, re.DOTALL))
+
+                if think_block_present and main_content_present:
+                    self.log_message.emit(f"{model_name} response validated: <think> block and main content are present.", "INFO")
                     return response_content
+            
+                # --- IMPROVED ERROR HANDLING AND CORRECTION ---
                 else:
-                    self.log_message.emit(f"Validation FAILED: <think> block missing in response (Attempt {attempt + 1}).", "WARN")
+                    correction_prompt_text = ""
+                    if not think_block_present:
+                        self.log_message.emit(f"Validation FAILED: <think> block missing (Attempt {attempt + 1}).", "WARN")
+                        correction_prompt_text = "Your previous response was invalid because it did not contain the mandatory `<think>...</think>` block. You MUST include this block."
+                    else: # This means the think block was present, but the main answer was NOT.
+                        self.log_message.emit(f"Validation FAILED: Main answer content is missing after the <think> block (Attempt {attempt + 1}).", "WARN")
+                        correction_prompt_text = "Your previous response was invalid. You provided a `<think>` block with your reasoning, but you FAILED to provide the user-facing answer *after* the closing `</think>` tag. You MUST provide the final answer after your thoughts."
+
                     if attempt < max_retries:
-                        # Add the failed response and a correction prompt for the next attempt
-                        correction_prompt = {
-                            'role': 'user',
-                            'content': "Your previous response was invalid because it did not contain the mandatory `<think>...</think>` block explaining your reasoning. You MUST include this block in your response. Please correct this and reply again."
-                        }
-                        # We add the model's failed attempt to the history so it knows what it did wrong
+                        # Add the model's failed attempt to history so it knows what it did wrong
                         current_messages.append({'role': 'assistant', 'content': response_content}) 
-                        current_messages.append(correction_prompt)
-                        self.log_message.emit("Retrying with correction prompt...", "STEP")
+                        # Add the specific correction prompt
+                        current_messages.append({'role': 'user', 'content': correction_prompt_text})
+                        self.log_message.emit("Retrying with a specific correction prompt...", "STEP")
                     else:
-                        self.log_message.emit(f"Max retries reached. Forcing a <think> block into the response.", "ERROR")
-                        # Prepend a think block to satisfy the UI and indicate the failure
-                        return f"<think>GENERATION FAILURE: Model failed to produce a valid thinking process after {max_retries + 1} attempts.</think>\n{response_content}"
+                        self.log_message.emit(f"Max retries reached. Forcing a failure message into the response.", "ERROR")
+                        return f"<think>GENERATION FAILURE: Model failed to produce a valid response with an answer after {max_retries + 1} attempts. The last attempt only contained reasoning.</think>\nI'm sorry, but I encountered an error while formulating my response. Please try rephrasing your query."
 
             except Exception as e:
                 self.log_message.emit(f"{model_name} request failed on attempt {attempt + 1}: {e}", "ERROR")
                 if attempt == max_retries:
-                    # If all retries fail due to exceptions, raise the last one
-                    raise
-        
-        # This part should ideally not be reached, but as a fallback
+                    raise # If all retries fail due to exceptions, raise the last one
+    
+        # Fallback in case the loop exits unexpectedly
         return "<think>An unexpected error occurred in the generation loop.</think>Error: Could not get a valid response from the model."
 
     def _attach_sources_to_response(self, response_text: str, sources: List[Dict]) -> str:
@@ -1239,7 +1205,7 @@ class MainWindow(QMainWindow):
         if is_user:
             bubble = MessageBubble(text) # The first argument is always the main text.
             bubble.container.setProperty("isUser", True)
-        
+    
         # AI messages need to be parsed.
         else:
             working_text = text
@@ -1250,20 +1216,23 @@ class MainWindow(QMainWindow):
             think_match = re.search(r'<think>(.*?)</think>', working_text, re.DOTALL)
             if think_match:
                 thinking_text = think_match.group(1).strip()
+                # This next line is CRITICAL: it removes the think block from the text that will become the main message.
                 working_text = re.sub(r'<think>.*?</think>', '', working_text, flags=re.DOTALL).strip()
 
             # 2. Find the <sources> block, extract its content, and then REMOVE it from the working_text.
             sources_match = re.search(r'<sources>(.*?)</sources>', working_text, re.DOTALL)
             if sources_match:
                 sources_block = sources_match.group(1)
+                # This line removes the sources block, leaving only the main answer.
                 working_text = re.sub(r'<sources>.*?</sources>', '', working_text, flags=re.DOTALL).strip()
-                
+            
                 # Parse the individual citations from the sources block.
                 citations_found = re.findall(r'<source url="([^"]+)" date="([^"]*)">(.*?)</source>', sources_block)
                 if citations_found:
                     citations = []
                     for url, date, title in citations_found:
                         clean_title = title.strip() or "Unknown Title"
+                        # Truncate long titles for better display
                         if len(clean_title) > 80: clean_title = clean_title[:77] + "..."
                         citations.append({'url': url, 'date': date or "N/A", 'title': clean_title})
 
@@ -1271,29 +1240,30 @@ class MainWindow(QMainWindow):
             main_content_html = markdown2.markdown(working_text, extras=["fenced-code-blocks", "tables", "cuddled-lists"])
 
             # 4. Create the bubble, passing the three separated components to the constructor.
+            #    This now correctly includes the thinking_text.
             bubble = MessageBubble(main_content_html, citations=citations, thinking_text=thinking_text)
             bubble.container.setProperty("isUser", False)
             bubble.container.setMinimumWidth(650)
             bubble.container.setMaximumWidth(650)
-        
+    
         # This layout logic is the same for both user and AI bubbles.
         row_container = QWidget()
         row_layout = QHBoxLayout(row_container)
         row_layout.setContentsMargins(5, 5, 5, 5)
         row_layout.setSpacing(0)
-        
+    
         if is_user: 
             row_layout.addStretch()
             row_layout.addWidget(bubble, 0, Qt.AlignTop)
         else: 
             row_layout.addWidget(bubble, 0, Qt.AlignTop)
             row_layout.addStretch()
-        
+    
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, row_container)
-        
+    
         QTimer.singleShot(50, lambda: self.chat_scroll.verticalScrollBar().setValue(
             self.chat_scroll.verticalScrollBar().maximum()))
-
+    
     def handle_response(self, response: str, original_prompt: str):
         self.add_message_to_ui(response, is_user=False)
         self.memory.add_message(role='user', content=original_prompt)

@@ -21,83 +21,68 @@ Chorus doesn’t just answer questions—it *reasons*. It operates a sophisticat
 Think of it as your own **local, autonomous research team**: more accurate than a standard chatbot, more transparent than any commercial alternative, and completely in your control.
 
 ![Untitled video - Made with Clipchamp (7)](https://github.com/user-attachments/assets/bce07038-1c9c-4994-8557-1cf9ace0fc66)
-
----
-
 <img width="1100" height="750" alt="Screenshot 2025-08-22 134740" src="https://github.com/user-attachments/assets/e90fd8c2-a75f-48fc-910a-3fdd421cbe0a" />
-
-
----
-
-
 <img width="1100" height="750" alt="Screenshot 2025-08-22 134815" src="https://github.com/user-attachments/assets/65ddf6bc-3279-48af-94f6-f0edcd84889e" />
-
----
-
 <img width="1100" height="750" alt="Screenshot 2025-08-22 135904" src="https://github.com/user-attachments/assets/aea72000-3b65-44a4-b98e-1f62192fb1a8" />
-
-
----
-
 <img width="1100" height="750" alt="Screenshot 2025-09-18 120239" src="https://github.com/user-attachments/assets/74048279-2126-4088-ab89-2b4dbdfdbc59" />
-
-
----
-
 <img width="1100" height="750" alt="Screenshot 2025-09-19 115835" src="https://github.com/user-attachments/assets/b37e5328-43e2-468b-8c73-9d3b2302fe4a" />
-
----
-
 <img width="1100" height="750" alt="Screenshot 2025-09-19 120054" src="https://github.com/user-attachments/assets/302c1778-2fa9-485e-8688-8aa4ebbd2dc5" />
-
-
----
-
 <img width="1100" height="750" alt="Screenshot 2025-09-19 120025" src="https://github.com/user-attachments/assets/d66a5a33-bebf-4a93-82f7-4c35d03957b2" />
 
-
 ---
 
-## Key Innovations
+## Architectural Deep Dive: The Journey of a Query
 
--    **You can run this on a single 3090 with less than 16gb Ram!!**
+The sophistication of Chorus lies in its multi-agent, sequential, and recursive pipeline. Each user query initiates a journey through a series of specialized agents and logic gates, ensuring that the final output is the product of a rigorous, verifiable process.
 
--   **The Chorus of Agents:** This is not a monolithic AI. Chorus operates a sophisticated system where specialized AI agents collaborate to handle each stage of a request. This division of labor leads to more intelligent, robust, and reliable outcomes.
+### Step 1: Strategic Deconstruction & Planning
 
--   **The Narrator Agent:** A groundbreaking feature for transparency. A dedicated, lightweight AI agent observes the entire workflow and provides a running, human-like commentary in the Action Log (e.g., *"Okay, the initial search brought back a few hits; now I'll sift through them for quality."*). This turns the "black box" of AI reasoning into an observable story.
+Before any action is taken, the system first seeks to understand the user's true intent. This is handled by a dedicated **`IntentAgent`**, which acts as a strategic mission planner.
 
--   **Granular Batch Processing:** Instead of treating all web results as one giant block of text, Chorus processes each source individually. This allows the **Validator Agent** to approve or reject sources one by one and the **Abstraction Agent** to summarize them with greater focus and accuracy, dramatically improving the quality of the data used for the final answer.
+-   **Deep Conversational Context:** The agent is provided with a rich, hybrid context from the `SemanticMemory`. This includes a guaranteed, verbatim recall of the last two conversational turns and a semantically-retrieved selection of older, relevant messages. This allows the system to accurately resolve ambiguous follow-up commands like "go deeper on that".
+-   **Intelligent Abstraction:** The conversational history given to the `IntentAgent` is deliberately sanitized. Internal "thinking" processes (`<think>` blocks) from previous answers are stripped away, focusing the agent on the tangible information that was delivered to the user.
+-   **Task Decomposition:** The `IntentAgent`'s primary output is a structured plan. It deconstructs a complex query into a series of discrete, machine-friendly search topics, transforming a nuanced human request into an actionable set of research objectives.
 
--   **Adaptive Content Validation:** An intelligent Validator Agent first analyzes the *user's intent* (e.g., "are they asking a specific factual question or for a broad overview?"). It then applies a different set of validation rules accordingly, making smarter decisions about which sources are truly useful.
+### Step 2: Intelligent & Adaptive Information Retrieval
 
--   **Advanced Hybrid Memory:** The assistant leverages a dual-memory system:
-    -   **Short-Term:** Guarantees recall of the last few turns of conversation for immediate context.
-    -   **Long-Term Semantic:** Embeds the chat history into a vector space, allowing it to recall semantically relevant information from much earlier in the conversation.
+With a clear plan, the framework deploys its "scout" capabilities. This stage is designed to be adaptive and discerning, prioritizing signal over noise from the open web.
 
--   **Deterministic Source Citation:** The application **programmatically tracks and injects citations**. Source data (URL, title, date) is captured during scraping and attached to the final response by the application code, guaranteeing 100% accuracy.
+-   **Heuristic-Based Source Ranking:** The system uses a sophisticated ranking algorithm to prioritize search results *before* attempting to scrape them, applying a weighted score based on domain authority, information recency, and quality filtering against known low-signal domains.
+-   **Resilient Search Strategy:** The system employs a "narrow-to-broad" fallback mechanism. If a highly-specific, domain-targeted search fails, it automatically re-executes the search on the wider web, ensuring resilience.
+-   **Robust Content Extraction:** A two-stage extraction process uses a high-precision library (`trafilatura`) first, then falls back to a more aggressive HTML parser, guaranteeing that usable text is extracted from various web page structures.
 
-## How It Works: The Agentic Workflow
+### Step 3: Autonomous Quality Control
 
-Chorus's intelligence comes from a structured, multi-step workflow orchestrated between several specialized AI agents.
+Chorus operates on a "zero-trust" principle: all information is considered unreliable until it passes a rigorous, independent validation stage.
 
-#### The Chorus of Agents
+-   **The Dedicated `ValidatorAgent`:** A specialized agent with a single, uncompromising purpose: to validate content. Each scraped source is passed to this agent to be checked for relevance, depth, and alignment with the user's query.
+-   **The Unforgiving Gate:** The validation process is binary. The `ValidatorAgent` must return a definitive `<pass>` tag. Any source that fails this check is immediately and irrevocably discarded from the data pool.
+-   **Guaranteed Data-Source Integrity:** A crucial filtering function ensures that the final list of citations perfectly mirrors the data that was actually validated and used, making every reference directly traceable.
 
-1.  **Intent Agent (The Planner):** Analyzes the user's query and conversational context to produce a clear, actionable `<search_plan>`.
-2.  **Validator Agent (The Quality Gatekeeper):** Critically evaluates each scraped web source individually. It uses adaptive, intent-aware rules to return a `<pass>` or `<fail>` judgment, ensuring only relevant information proceeds.
-3.  **Refiner Agent (The Problem Solver):** If the initial search results are all rejected by the Validator, this agent analyzes the failure and generates a new, improved search plan to overcome the dead end.
-4.  **Abstraction Agent (The Summarizer):** Processes each *validated* source, extracting key facts and structuring the raw text into a clean, summarized format.
-5.  **Synthesis Agent (The Author):** The main agent that receives the structured data from the Abstraction Agent and synthesizes it into a final, cohesive, user-facing answer.
-6.  **Narrator Agent (The Commentator):** Observes the entire process from start to finish, providing a running monologue in the Action Log that explains what the system is doing at each step.
+### Step 4: Multi-Stage Synthesis & Self-Correction
 
-#### From Query to Answer: A Step-by-Step Breakdown
+The system is not a linear pipeline; it is a dynamic framework with internal feedback loops that allow it to adapt and recover from failure.
 
-1.  **User Input:** The user submits a query.
-2.  **Narration & Intent Analysis:** The **Narrator Agent** announces the start of the process. The **Intent Agent** analyzes the query and produces a search plan.
-3.  **Search Execution:** The **Synthesis Agent** (acting as orchestrator) executes the plan, using an intelligent URL ranking system to prioritize reliable domains.
-4.  **Content Extraction & Validation:** The system scrapes content from top URLs. The **Validator Agent** inspects each source individually. If all fail, the **Refiner Agent** is triggered to create a new plan.
-5.  **Abstraction:** For each source that passes validation, the **Abstraction Agent** is called to extract and structure the key information.
-6.  **Synthesis:** The **Synthesis Agent** receives the clean, structured data from all validated sources and composes a comprehensive, well-formatted Markdown answer.
-7.  **Deterministic Citation:** Finally, the application code itself—**not the LLM**—appends a perfectly formatted `<sources>` block to the response, guaranteeing accuracy.
+-   **The Refinement Loop (Failure Recovery):** If the Quality Control gate rejects *all* initial sources, the system triggers a recovery protocol, invoking a **`RefinerAgent`**. This agent is given the original failed query *and the specific reasons why sources were rejected* to construct a new, more intelligent search plan.
+-   **The Augmentation Loop (Information Gaps):** The final **`SynthesisAgent`** can request more information. If it determines a critical piece of information is missing, it can pause its own process and issue a request for an `<additional_search>`, which triggers a new, targeted search-and-validate cycle.
+
+### Step 5: Persistent Contextual Awareness
+
+Underpinning the entire process is the `SemanticMemory` class, which serves as the system's working memory and long-term knowledge base.
+
+-   **Hybrid Memory Model:** Combines the perfect recall of a short-term conversational queue with the power of long-term semantic retrieval, grounding every action in both immediate and broader context.
+-   **Conceptual Retrieval:** By using vector embeddings, the memory operates on conceptual meaning, not just keywords, allowing it to connect ideas across multiple conversational turns.
+
+## The Chorus of Agents
+
+Chorus's intelligence comes from a structured workflow orchestrated between several specialized AI agents.
+
+1.  **Intent Agent (The Planner):** Analyzes the user's query and conversational context to produce a clear, actionable search plan.
+2.  **Validator Agent (The Quality Gatekeeper):** Critically evaluates each scraped web source individually to return a `<pass>` or `<fail>` judgment.
+3.  **Refiner Agent (The Problem Solver):** If all initial results are rejected, this agent analyzes the failure feedback and generates an improved search plan.
+4.  **Abstraction Agent (The Summarizer):** Processes each *validated* source, extracting key facts and structuring the raw text into a clean format.
+5.  **Synthesis Agent (The Author):** The main agent that receives the structured data from all validated sources and synthesizes it into a final, cohesive, user-facing answer.
+6.  **Narrator Agent (The Commentator):** A unique feature for transparency. This lightweight agent observes the entire process, providing a running, human-like monologue in the Action Log that explains what the system is doing at each step.
 
 ## Technology Stack
 
@@ -110,23 +95,23 @@ Chorus's intelligence comes from a structured, multi-step workflow orchestrated 
 
 ## Getting Started
 
-Follow these instructions to get Chorus running on your local machine. 
+Follow these instructions to get Chorus running on your local machine.
 
 #### Prerequisites
 
 1.  **Python:** Ensure you have Python 3.10 or newer installed.
 2.  **Ollama:** You must have [Ollama](https://ollama.com/) installed and running on your system.
-3.  **Required Ollama Models:** The application relies on specific models for its agentic stack. Pull them using the following commands in your terminal:
+3.  **Required Ollama Models:** The application relies on specific models for its agentic stack. Pull them using the following commands in your terminal. **Note:** The application can run effectively on a single GPU with ~16GB of VRAM (e.g., RTX 3090).
 
     ```bash
-    # For main synthesis, planning, and abstraction agents
-    ollama pull qwen3:8b
-
-    # For the high-powered Validator agent
+    # For main synthesis and high-powered agents
     ollama pull qwen3:14b
 
+    # For planning, abstraction, and validation agents
+    ollama pull qwen3:8b
+
     # For the fast, lightweight Narrator agent
-    ollama pull qwen2.5:7b
+    ollama pull qwen2.5:7b-instruct
 
     # For generating vector embeddings for semantic memory
     ollama pull nomic-embed-text
@@ -136,8 +121,8 @@ Follow these instructions to get Chorus running on your local machine.
 
 1.  **Clone the Repository:**
     ```bash
-    git clone https://github.com/YOUR_USERNAME/Chorus-AI-Research-Assistant.git
-    cd Chorus-AI-Research-Assistant
+    git clone https://github.com/YOUR_USERNAME/Chorus.git
+    cd Chorus
     ```
 
 2.  **Install Dependencies:**
@@ -161,14 +146,13 @@ Once the prerequisites are met and dependencies are installed, start the applica
 
 ```bash
 python main.py 
-# (Or whatever you have named the main script, e.g., Ai_Web_Search.py)
+# (Or whatever you have named the main script)
 ```
 
 ## Usage Guide
 
 -   **Chat Interface:** The main window on the left is where you interact with the AI.
--   **Action Log:** The panel on the right provides a detailed, real-time log of the AI's internal state. Look for the *italic blue entries* from the **Narrator Agent** for a high-level summary of the process.
--   **Force Search Toggle:** The magnifying glass button (`⌕`) forces a web search, guaranteeing the most current information.
+-   **Action Log:** The panel on the right provides a detailed, real-time log of the AI's internal state. Look for the *italic blue entries* from the **Narrator Agent** for a high-level summary.
 -   **Expandable Details:** Responses may include "Thinking Process" and "Sources" buttons. Click these to see the agent's reasoning and view the source citations.
 -   **New Chat:** The "New Chat" button clears the conversation and the AI's memory, allowing you to start a fresh session.
 

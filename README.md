@@ -22,12 +22,9 @@ Chorus doesn’t just answer questions—it *reasons*. It operates a sophisticat
 
 Think of it as your own **local, autonomous research team**: more accurate than a standard chatbot, more transparent than any commercial alternative, and completely in your control.
 
-![Untitled video - Made with Clipchamp (8)](https://github.com/user-attachments/assets/76ea27e0-7fe4-403f-b42e-70216015570e)
-<img width="1100" height="750" alt="Screenshot 2025-09-23 080920" src="https://github.com/user-attachments/assets/85e58262-07a6-4b9f-af8a-75c9832b7782" />
-<img width="1100" height="750" alt="Screenshot 2025-09-23 080937" src="https://github.com/user-attachments/assets/d1055259-b290-4e95-9848-1a7089ec0515" />
-<img width="1100" height="750" alt="Screenshot 2025-09-23 081020" src="https://github.com/user-attachments/assets/c9ca44bd-c18b-4e20-9bcb-7190a5ef36eb" />
-<img width="1100" height="750" alt="Screenshot 2025-09-23 083635" src="https://github.com/user-attachments/assets/fadd90fa-fed6-4b11-ba5b-c0669e341c69" />
-<img width="1100" height="750" alt="Screenshot 2025-09-23 083653" src="https://github.com/user-attachments/assets/c2f85053-5fb6-4fb9-81a9-a69f647db5de" />
+![Untitled video - Made with Clipchamp (9)](https://github.com/user-attachments/assets/1c3b0b4f-a18c-4712-95c7-d76377671aae)
+<img width="1468" height="850" alt="Screenshot 2025-09-23 134620" src="https://github.com/user-attachments/assets/65d8d6f2-ef53-477a-9656-75045cec0f74" />
+<img width="1468" height="850" alt="Screenshot 2025-09-23 134636" src="https://github.com/user-attachments/assets/b935a702-144d-4637-8fe8-efa4971a44c6" />
 
 
 

@@ -7,7 +7,7 @@
 ![Status](https://img.shields.io/badge/status-active-success.svg)
 
 ---
-Audio Overview of Original Version: https://notebooklm.google.com/notebook/cbf76f05-313c-47a9-8a30-3beaf7f34610?artifactId=029bfd23-4d50-479d-a819-7a53a285b060
+Audio Overview: https://notebooklm.google.com/notebook/cbf76f05-313c-47a9-8a30-3beaf7f34610?artifactId=029bfd23-4d50-479d-a819-7a53a285b060
 ---
 
 An open-source, privacy-first alternative to Perplexity & ChatGPT’s web search mode, powered by local models, a multi-agent architecture, and real-time web access. It can run effectively on consumer-grade hardware with as little as 12GB of VRAM (e.g., a single GEFORCE RTX 3060 GPU).
@@ -23,8 +23,7 @@ Chorus doesn’t just answer questions—it *reasons*. It operates a sophisticat
 
 Think of it as your own **local, autonomous research team**: more accurate than a standard chatbot, more transparent than any commercial alternative, and completely in your control.
 
-**[NOTE: The screenshots and GIF below are from a previous version. Please update them to reflect the new UI with the history panel.]**
-
+---
 ![Untitled video - Made with Clipchamp (9)](https://github.com/user-attachments/assets/1c3b0b4f-a18c-4712-95c7-d76377671aae)
 <img width="1468" height="850" alt="Screenshot 2025-09-23 134620" src="https://github.com/user-attachments/assets/65d8d6f2-ef53-477a-9656-75045cec0f74" />
 <img width="1468" height="850" alt="Screenshot 2025-09-23 134636" src="https://github.com/user-attachments/assets/b935a702-144d-4637-8fe8-efa4971a44c6" />
@@ -84,6 +83,46 @@ Chorus's intelligence comes from a structured workflow orchestrated between seve
 6.  **Narrator Agent (The Commentator):** Provides a running, human-like monologue in the Action Log, transparently explaining what the system is doing at each step.
 7.  **Title Agent (The Archivist):** A new, lightweight agent that runs in the background to generate a concise title for new conversations, keeping the chat history organized.
 
+---
+
+## Is Chorus the Right Tool For You? A Deep Dive
+
+Chorus is more than just a piece of software; it's a statement about how AI should work. It's built for a specific kind of user who values not just the answer, but the *integrity of the process* used to get there.
+
+This is not a drop-in replacement for a casual chatbot. It is an **intellectual co-pilot** for serious work, a **private research workshop**, and a **transparent reasoning engine**. If any of the following resonates with you, you're in the right place.
+
+### You'll Feel Right at Home with Chorus If...
+
+*   **You demand radical transparency.**
+    You're tired of the "black box" nature of commercial AI. You don't just want to see the sources; you want to see the *gears turning*. The live **Action Log** and unique **Narrator Agent** provide a running commentary on the AI's entire thought process, from planning to validation to self-correction. It’s a glass-box design for those who need to understand the *how* and *why*.
+
+*   **You believe in verifiable answers, not "magic."**
+    For you, an unsourced statement from an AI is a liability, not a convenience. Chorus is built on a foundation of **verifiability**. Its multi-agent pipeline is a rigorous methodology designed to find, validate, and cite information. Every answer is directly traceable to the data that passed its stringent quality control, giving you a chain of custody for your facts.
+
+*   **You treat privacy and data ownership as non-negotiable.**
+    The idea of your research, sensitive queries, or proprietary data being used to train a third-party model is unacceptable. Chorus runs **100% locally**. Your conversations, prompts, and the documents it generates never leave your machine. It's not just "privacy-friendly"; it's architecturally private by default.
+
+*   **You want to leverage the hardware you already own.**
+    You've invested in a capable GPU and see it as a powerful, underutilized resource. Chorus is designed to turn that hardware into a private AI powerhouse, running effectively on consumer-grade GPUs (like an RTX 3060). It frees you from vendor lock-in and the endless drain of API subscription fees.
+
+*   **You need a tool that adapts, not just executes.**
+    Real research is messy. Dead-ends and bad sources are part of the process. Chorus is built to handle this reality. Its **self-correction and refinement loops** mean it doesn't just fail silently; it analyzes *why* a search failed and tries a smarter approach. It's a resilient tool built for the complexities of the open web.
+
+*   **You're a builder, a tinkerer, or a power user.**
+    You see AI as a workshop, not a sealed appliance. Because Chorus is open-source and runs locally, you have ultimate control. You can swap the models, tune the agent prompts in the `System_Instructions.txt` file, and integrate its logic into your own workflows. It’s a system designed to be understood, modified, and owned.
+
+### ...But Chorus Might *Not* Be Your First Choice If:
+
+We believe in intellectual honesty. Chorus is a specialized tool, and it excels at its core mission. However, it may not be the best fit if:
+
+*   **You need the absolute fastest answer for simple questions.** The multi-agent process is thorough, but it's not instantaneous. For a quick "what's the capital of Mongolia," a centralized cloud service will always be faster.
+*   **You're looking for a casual, conversational companion.** Chorus is a goal-oriented research assistant. Its process is overkill for chit-chat or creative writing tasks.
+*   **You prefer a zero-setup, browser-based experience.** Running Chorus requires installing Ollama and downloading several gigabytes of models. It's a one-time setup, but it's more involved than simply opening a new tab.
+
+If you see your values reflected in the first section, then Chorus is built for you. It’s a tool for those who believe that the future of AI should be open, transparent, and firmly in the hands of the user.
+
+---
+
 ## Technology Stack
 
 -   **Backend:** Python 3.10+
@@ -92,6 +131,8 @@ Chorus's intelligence comes from a structured workflow orchestrated between seve
 -   **Web Search:** `duckduckgo-search`
 -   **Web Scraping & Extraction:** `requests`, `BeautifulSoup4`, `trafilatura`
 -   **Vector Math (for Semantic Memory):** `numpy`
+
+---
 
 ## Getting Started
 
@@ -119,6 +160,8 @@ Follow these instructions to get Chorus running on your local machine.
     # For generating vector embeddings for semantic memory
     ollama pull nomic-embed-text
     ```
+    
+---
 
 #### Installation
 
@@ -142,6 +185,7 @@ Follow these instructions to get Chorus running on your local machine.
     ```bash
     pip install PySide6 ollama numpy requests duckduckgo-search beautifulsoup4 trafilatura markdown2
     ```
+---
 
 #### Running the Application
 
@@ -150,6 +194,8 @@ Once the prerequisites are met and dependencies are installed, start the applica
 ```bash
 python chorus.py 
 ```
+
+---
 
 ## Usage Guide
 
@@ -160,6 +206,8 @@ python chorus.py
 -   **Starting a New Chat:** Click the "**＋ New Chat**" button in the history panel header to begin a new, unsaved conversation. The chat will be automatically saved and titled after you send your first message.
 -   **Expandable Details:** Responses may include "Thinking Process" and "Sources" buttons. Click these to see the agent's reasoning and view the source citations.
 
+---
+
 ## Contributing
 
 Contributions are welcome! If you have suggestions for improvements or encounter any bugs, please feel free to open an issue or submit a pull request.
@@ -169,6 +217,8 @@ Contributions are welcome! If you have suggestions for improvements or encounter
 3.  Commit your changes (`git commit -m 'Add a new feature'`).
 4.  Push to the branch (`git push origin feature/NewFeature`).
 5.  Open a Pull Request.
+
+---
 
 ## License
 

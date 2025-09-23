@@ -1,14 +1,3 @@
-Of course. Here is a revised README that reflects the significant architectural changes, new features, and enhanced agent capabilities of the updated application.
-
-The key changes focus on:
-1.  Highlighting the new **Persistent Chat History** feature.
-2.  Updating the **Architecture Deep Dive** to include the `HistoryManager` and the more sophisticated agent logic.
-3.  Revising the **Agent List** to include the new `TitleAgent` and update existing agent descriptions.
-4.  Updating the **Getting Started** section with the correct list of required Ollama models.
-5.  Rewriting the **Usage Guide** to match the new three-panel UI and its functionality.
-
----
-
 # Chorus: A Multi-Agent AI Research Assistant
 
 ![Python](https://img.shields.io/badge/python-3.10+-blue.svg)

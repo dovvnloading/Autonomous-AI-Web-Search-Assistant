@@ -20,14 +20,16 @@ Chorus doesn’t just answer questions—it *reasons*. It operates a sophisticat
 
 Think of it as your own **local, autonomous research team**: more accurate than a standard chatbot, more transparent than any commercial alternative, and completely in your control.
 
-![Untitled video - Made with Clipchamp (7)](https://github.com/user-attachments/assets/bce07038-1c9c-4994-8557-1cf9ace0fc66)
-<img width="1100" height="750" alt="Screenshot 2025-08-22 134740" src="https://github.com/user-attachments/assets/e90fd8c2-a75f-48fc-910a-3fdd421cbe0a" />
-<img width="1100" height="750" alt="Screenshot 2025-08-22 134815" src="https://github.com/user-attachments/assets/65ddf6bc-3279-48af-94f6-f0edcd84889e" />
-<img width="1100" height="750" alt="Screenshot 2025-08-22 135904" src="https://github.com/user-attachments/assets/aea72000-3b65-44a4-b98e-1f62192fb1a8" />
-<img width="1100" height="750" alt="Screenshot 2025-09-18 120239" src="https://github.com/user-attachments/assets/74048279-2126-4088-ab89-2b4dbdfdbc59" />
-<img width="1100" height="750" alt="Screenshot 2025-09-19 115835" src="https://github.com/user-attachments/assets/b37e5328-43e2-468b-8c73-9d3b2302fe4a" />
-<img width="1100" height="750" alt="Screenshot 2025-09-19 120054" src="https://github.com/user-attachments/assets/302c1778-2fa9-485e-8688-8aa4ebbd2dc5" />
-<img width="1100" height="750" alt="Screenshot 2025-09-19 120025" src="https://github.com/user-attachments/assets/d66a5a33-bebf-4a93-82f7-4c35d03957b2" />
+![Untitled video - Made with Clipchamp (8)](https://github.com/user-attachments/assets/76ea27e0-7fe4-403f-b42e-70216015570e)
+<img width="1100" height="750" alt="Screenshot 2025-09-23 080920" src="https://github.com/user-attachments/assets/85e58262-07a6-4b9f-af8a-75c9832b7782" />
+<img width="1100" height="750" alt="Screenshot 2025-09-23 080937" src="https://github.com/user-attachments/assets/d1055259-b290-4e95-9848-1a7089ec0515" />
+<img width="1100" height="750" alt="Screenshot 2025-09-23 081020" src="https://github.com/user-attachments/assets/c9ca44bd-c18b-4e20-9bcb-7190a5ef36eb" />
+<img width="1100" height="750" alt="Screenshot 2025-09-23 083635" src="https://github.com/user-attachments/assets/fadd90fa-fed6-4b11-ba5b-c0669e341c69" />
+<img width="1100" height="750" alt="Screenshot 2025-09-23 083653" src="https://github.com/user-attachments/assets/c2f85053-5fb6-4fb9-81a9-a69f647db5de" />
+
+
+
+
 
 ---
 

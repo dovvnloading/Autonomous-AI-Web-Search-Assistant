@@ -1,2 +1,128 @@
 UPDATE LOG
 ---
+
+
+9_22_25
+---
+### **Change Log: Project Refactoring**
+
+The single-file application was refactored into a modular, four-file structure to separate concerns and improve maintainability.
+
+#### **Old Structure:**
+*   `monolithic_app.py` (Contained all UI, logic, and configuration)
+
+#### **New Structure:**
+*   `main.py`
+*   `uimain_window.py`
+*   `core_logic.py`
+*   `config.py`
+
+---
+
+### **New File Responsibilities:**
+
+1.  **`main.py` (Entry Point)**
+    *   Starts the application. Its only job is to launch the UI from `uimain_window.py`.
+
+2.  **`uimain_window.py` (User Interface)**
+    *   Contains all UI code: the `MainWindow`, message bubbles, and stylesheet. Manages everything the user sees and interacts with.
+
+3.  **`core_logic.py` (Backend Logic)**
+    *   The application's "brain." Contains the `SearchWorker` class, which handles all backend processing: web scraping, agent orchestration, and LLM communication.
+
+4.  **`config.py` (Configuration)**
+    *   A centralized file for all settings and constants. Model names, the universal `PROMPT_FILE_PATH`, and other parameters are defined here for easy modification.
+---
+---
+
+9_22_25
+---
+Update Ai_Web_Search.py
+### High-Level Summary of Changes
+
+The new code represents a significant architectural evolution, moving from a flexible but complex "decide-then-search" model to a more streamlined and robust "always-search-intelligently" paradigm. The core philosophy has shifted to assume that every user query benefits from a fresh, context-aware web search.
+
+Key improvements focus on three main areas:
+1.  **Intelligence & Context:** The system no longer just decides *if* it should search, but now analyzes *how* to search. By classifying the user's intent into categories (e.g., `financial`, `news`, `historical`), it can perform much smarter, domain-specific searches and ranking.
+2.  **Efficiency & Performance:** A new Memory Summarization Agent has been introduced to keep the long-term semantic memory lean and effective. Detailed performance timing has been added to the logs, and the UI now includes a stopwatch for user feedback.
+3.  **Robustness & User Experience:** The "Force Search" toggle has been removed to simplify the user experience and the core logic. A 30-minute worker timeout has been implemented to prevent hung processes, and the overall code flow is more linear and predictable.
+
+---
+
+### Ⅰ. Architectural & Core Logic Changes
+
+#### **1. Removal of "Force Search" and "Search Decision" Logic**
+The most fundamental change is the elimination of the initial decision-making step. In the old version, the application would first ask a general-purpose LLM if a web search was even necessary, a decision the user could bypass with a "Force Search" toggle. This entire dual-path logic has been removed. The new architecture operates on the principle that a targeted web search is always the optimal starting point. This simplifies the `run()` method, makes the application's behavior consistent and predictable, and streamlines the user interface by removing the toggle button.
+
+#### **2. Introduction of "Search Type" Classification Pipeline**
+This is the most significant intelligence upgrade. Previously, the IntentAgent only extracted search *topics*. Now, it performs a crucial second task: classifying the user query's intent into a specific `search_type` (e.g., `financial`, `news`, `historical`, `tech`). This classification is then passed down through the entire search pipeline, from execution to scraping to ranking. This enables highly contextual ranking (preferring financial sites for stock queries, academic sites for historical queries) and smarter query augmentation (e.g., only adding the current year to time-sensitive searches).
+
+#### **3. Addition of a Memory Summarization Agent**
+To improve long-term context and efficiency, a new agent has been introduced. The old system stored the full, verbose AI response in the semantic memory. The new system, after generating a final answer, calls a `MemorySummaryAgent`. This agent creates a concise, third-person summary of the interaction (e.g., "Answered the user's query about the Q2 2024 earnings of NVIDIA by summarizing financial reports from Bloomberg and Reuters."). This lean summary is then stored in the semantic memory. This keeps the memory efficient, reduces noise, and improves the quality of semantic recall for future conversations.
+
+---
+
+### Ⅱ. Detailed `SearchWorker` Class Changes
+
+*   **Constructor (`__init__`)**
+    *   **Old:** Accepted a `force_search: bool` parameter and initialized a `main_messages` list based on the `MAIN_SEARCH_PROMPT`.
+    *   **New:** The `force_search` parameter is removed. It now initializes specialized prompt lists for `synthesis_messages` and `memory_summary_messages`. New attributes `start_time` and `last_step_time` are added to track performance. The `SEARCH_INTENT_PROMPT` is now dynamically formatted with richer temporal context (time, date, timezone).
+    *   **Impact:** This aligns the constructor with the new, specialized agent architecture and introduces performance logging capabilities from the very start of a request.
+
+*   **`finished` Signal**
+    *   **Old:** Defined as `Signal(str)`, emitting only the final response text.
+    *   **New:** Defined as `Signal(str, str)`, now emitting both the full response for the UI and the condensed summary for the semantic memory.
+    *   **Impact:** This change is crucial for implementing the new memory summarization workflow, decoupling what the user sees from what the system remembers.
+
+*   **`_get_search_plan` Method**
+    *   **Old:** Returned a single string containing the search plan.
+    *   **New:** Now returns a tuple containing two items: the list of search topics and the classified `search_type` string (e.g., "financial").
+    *   **Impact:** This is a major enhancement. The method's new output drives the entire intelligent ranking pipeline by providing the necessary context for subsequent steps.
+
+*   **`_validate_scraped_content_batch` Method**
+    *   **Old:** Took a list of scraped content and validated every piece against the single, original user prompt.
+    *   **New:** Now takes a list of `(content, query)` pairs. It validates each piece of scraped content against the *specific sub-query that found it*.
+    *   **Impact:** This provides a massive improvement in validation accuracy. Content is judged on its relevance to the precise topic it was searched for, not the broader, original query.
+
+*   **`execute_search_plan` Method**
+    *   **Old:** Returned a simple list of scraped content strings.
+    *   **New:** Now accepts the `search_type` as a parameter to pass down to its child functions. It returns a list of `(content, query)` tuples.
+    *   **Impact:** This method now acts as a critical conduit, passing the `search_type` to the ranking function and bundling the resulting content with its source query for the improved validation method.
+
+*   **`rank_urls_by_quality` Method**
+    *   **Old:** Relied on generic keyword matching (e.g., "news", "stock") within the user's query to guess at priorities.
+    *   **New:** Directly accepts the classified `search_type` from the IntentAgent. It uses a large `if/elif` block to apply different, highly specific ranking rules and prioritize authoritative domains based on this type.
+    *   **Impact:** This is the core of the intelligence upgrade, leading to far more relevant and trustworthy source selection.
+
+*   **`run` Method**
+    *   **Old:** Contained a large, complex `if/else` block to handle the "force search" vs. "model-decided search" paths.
+    *   **New:** The logic is now a single, linear "always search" path. It starts timers for performance tracking and concludes by calling the new `_summarize_for_memory` method before emitting the `finished` signal.
+    *   **Impact:** The workflow is significantly more robust, predictable, and easier to debug. It now measures its own performance and populates the memory with high-quality summaries.
+
+*   **New Helper Methods**
+    *   **`_summarize_for_memory()`:** Implements the call to the new Memory Summary Agent.
+    *   **`_log_step()` & `_format_duration()`:** These methods were added to provide detailed, timed logging. Each major step in the Action Log is now appended with the time it took to complete (e.g., "Validation complete (took 15.2s)").
+
+---
+
+### Ⅲ. UI & User Experience (`MainWindow`) Changes
+
+*   **Search Toggle Button**
+    *   **Old:** The UI featured a "Force Search" (`⌕`) button next to the send button.
+    *   **New:** This button and its associated logic have been completely removed.
+    *   **Impact:** The UI is cleaner and simpler. The user no longer needs to make a decision about how the application should behave, as it now follows a single, optimized process.
+
+*   **In-Progress Feedback**
+    *   **Old:** A simple status label updated with the current step (e.g., "Searching...").
+    *   **New:** In addition to the status label, a stopwatch timer (`Elapsed: 00:00`) now appears while a query is running.
+    *   **Impact:** This gives the user clear, real-time feedback on how long their request is taking, which greatly improves the user experience for complex queries that may take more time.
+
+*   **Process Robustness and Timeout**
+    *   **Old:** There was no explicit timeout. A long-running or hung process could leave the application in an unresponsive state indefinitely.
+    *   **New:** A 30-minute `worker_timeout_timer` is now implemented. If a request exceeds this limit, the worker thread is terminated, and a clear error message is displayed to the user.
+    *   **Impact:** This makes the application significantly more stable and prevents it from becoming permanently frozen due to a network or model issue.
+
+*   **Memory Handling in UI**
+    *   **Old:** The `handle_response` function received the original user prompt and the full, verbose AI response, storing the latter directly into memory.
+    *   **New:** The `handle_response` function now receives two arguments from the worker's `finished` signal: the full response (for display) and the `summary_for_memory` (for storage). It now stores the concise summary in the semantic memory.
+    *   **Impact:** This completes the implementation of the new memory summarization architecture on the client side.

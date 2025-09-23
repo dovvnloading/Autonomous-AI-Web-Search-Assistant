@@ -10,7 +10,7 @@
 Audio Overview: https://notebooklm.google.com/notebook/cbf76f05-313c-47a9-8a30-3beaf7f34610?artifactId=029bfd23-4d50-479d-a819-7a53a285b060
 ---
 
-An open-source, privacy-first alternative to Perplexity & ChatGPT’s web search mode, powered by local models, a multi-agent architecture, and real-time web access.
+An open-source, privacy-first alternative to Perplexity & ChatGPT’s web search mode, powered by local models, a multi-agent architecture, and real-time web access that can be ran with little as 12gb of ram. Ran entriley on a single GEFORE RTX 3060 GPU.
 
 Chorus doesn’t just answer questions—it *reasons*. It operates a sophisticated workflow where a **chorus of specialized AI agents** collaborate to plan, search, validate, abstract, and narrate the entire process of finding and synthesizing information. It runs entirely on your local machine, ensuring every interaction is secure, private, and radically transparent.
 
@@ -105,7 +105,7 @@ Follow these instructions to get Chorus running on your local machine.
 
 1.  **Python:** Ensure you have Python 3.10 or newer installed.
 2.  **Ollama:** You must have [Ollama](https://ollama.com/) installed and running on your system.
-3.  **Required Ollama Models:** The application relies on specific models for its agentic stack. Pull them using the following commands in your terminal. **Note:** The application can run effectively on a single GPU with ~16GB of VRAM (e.g., RTX 3090).
+3.  **Required Ollama Models:** The application relies on specific models for its agentic stack. Pull them using the following commands in your terminal. **Note:** The application can run effectively on a single GPU with ~12GB of VRAM (e.g., GEFORE RTX 3060).
 
     ```bash
     # For main synthesis and high-powered agents

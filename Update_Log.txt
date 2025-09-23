@@ -1,9 +1,12 @@
 UPDATE LOG
 ---
 
-
+---------------------
 9_22_25
----
+---------------------
+
+
+
 ### **Change Log: Project Refactoring**
 
 The single-file application was refactored into a modular, four-file structure to separate concerns and improve maintainability.
@@ -35,8 +38,14 @@ The single-file application was refactored into a modular, four-file structure t
 ---
 ---
 
+
+
+------------------------------------------
 9_22_25
----
+------------------------------------------
+
+
+
 Update Ai_Web_Search.py
 ### High-Level Summary of Changes
 
@@ -126,3 +135,201 @@ To improve long-term context and efficiency, a new agent has been introduced. Th
     *   **Old:** The `handle_response` function received the original user prompt and the full, verbose AI response, storing the latter directly into memory.
     *   **New:** The `handle_response` function now receives two arguments from the worker's `finished` signal: the full response (for display) and the `summary_for_memory` (for storage). It now stores the concise summary in the semantic memory.
     *   **Impact:** This completes the implementation of the new memory summarization architecture on the client side.
+
+
+
+------------------------------------------
+9_23_25
+------------------------------------------
+
+
+
+### Summary of Changes
+
+The application underwent a major refactoring from a single, monolithic script into a well-structured, modular application. This overhaul introduced significant new features, most notably **persistent chat history**, and greatly improved maintainability, configuration, and portability. The core agent-based search logic remains similar but has been refined with better model selection and configuration management.
+
+---
+
+### I. Project Structure & Modularization (Major Refactoring)
+
+The single-file application was broken down into multiple Python modules, each with a specific responsibility. This is the most significant change, improving code organization and scalability.
+
+*   **Old Structure:** A single Python script containing all UI, logic, and data classes.
+*   **New Structure:**
+    *   `chorus.py` / `main.py`: A clean, minimal entry point to launch the application.
+    *   `config.py`: A centralized module for all constants, model names, file paths, and application settings.
+    *   `core_logic.py`: Contains the primary business logic, including the `SearchWorker` and the new `TitleWorker`.
+    *   `history_manager.py`: A new module with the `HistoryManager` class, responsible for saving, loading, and managing chat sessions to a JSON file.
+    *   `semantic_memory.py`: The `SemanticMemory` class was extracted into its own dedicated module.
+    *   `ui/main_window.py`: The main UI class `MainWindow` was moved here.
+    *   `ui/widgets.py`: Reusable UI components like `CustomTitleBar` and `MessageBubble` were extracted into this module.
+
+---
+
+### II. Major New Features & Functionality
+
+*   **Persistent Chat History:**
+    *   The application now saves all chat conversations to a `chat_history.json` file in the user's application data directory.
+    *   A new `HistoryManager` class was introduced to handle all file I/O for creating, reading, updating, and deleting chats.
+    *   The UI now features a **collapsible left-side panel** that lists all saved chat sessions, sorted by date.
+    *   Users can click on a past session to load it back into the chat window.
+    *   A context menu (right-click) on chat history items allows users to **Rename** or **Delete** conversations.
+
+*   **Asynchronous Chat Titling:**
+    *   A new `TitleWorker` class (in `core_logic.py`) was created.
+    *   When a new chat is started, this worker runs in the background to generate a concise title for the conversation based on the first user message, preventing any UI lag.
+    *   The generated title is then displayed in the history panel.
+
+---
+
+### III. UI Enhancements
+
+*   **Redesigned Main Window Layout:**
+    *   The UI now has a three-panel layout: a collapsible **History Panel** on the left, the main **Chat Panel** in the center, and the **Action Log** on the right.
+    *   The `CustomTitleBar` was updated with a new toggle button (`❮`/`➤`) to show/hide the history panel with a smooth animation.
+    *   The "New Chat" button was moved from the bottom status bar to the header of the new History Panel.
+    *   A `QSizeGrip` was added to the bottom-right corner of the window for easier resizing.
+
+*   **Chat Management:**
+    *   The old "New Chat" (`clear_button`) functionality, which simply cleared the screen, has been replaced. The new "＋ New Chat" button now creates a proper new, unsaved chat session, ready to be saved upon the first message.
+
+---
+
+### IV. Core Logic & Agent Refinements
+
+*   **Centralized Configuration:**
+    *   All hardcoded values (model names, search parameters, file paths, UI styles) have been moved to `config.py`.
+    *   This allows for easy tuning of parameters like `SCRAPE_TOP_N_RESULTS` (increased from 5 to 8) and `MAX_SOURCES_TO_SCRAPE` (increased from 2 to 3).
+
+*   **Improved Model Management:**
+    *   Specific models are now assigned to specific tasks in `config.py` (e.g., `NARRATOR_MODEL`, `INTENT_MODEL`, `SYNTHESIS_MODEL`).
+    *   Smaller, faster models (e.g., `qwen2.5:3b`) are used for simpler tasks like narration and title generation, improving performance and reducing resource usage.
+    *   The core logic now references these config variables instead of hardcoded model strings, making it easy to swap out models.
+
+*   **Enhanced Portability:**
+    *   The hardcoded Windows-specific file path for `System_Instructions.txt` has been replaced. The application now correctly locates this file relative to its own script directory, allowing it to run from any location on any OS.
+    *   The chat history file is now stored in the standard user application data directory (`AppData`, `~/.local/share`, etc.), which is the correct cross-platform approach.
+
+---
+
+### V. Semantic Memory & Data Handling
+
+*   **Separation of Memory vs. Display Content:**
+    *   The `SemanticMemory.add_message` method was fundamentally changed. It now accepts `memory_content` and `display_content` separately.
+    *   This allows the system to store a concise, semantically rich summary of an AI's response in memory for better future context, while still saving the full, formatted response for display in the UI.
+    *   `add_message` now returns a serializable dictionary, which is then passed to the `HistoryManager` to be saved to disk.
+
+*   **State Hydration:**
+    *   A new `SemanticMemory.load_memory` method was added. This is crucial for the new history feature, as it repopulates the live semantic memory with the data from a selected chat session.
+
+*   **Increased Robustness:**
+    *   The `load_memory` method includes checks to prevent the application from crashing if it encounters corrupted or malformed message entries in the `chat_history.json` file.
+
+---
+
+### VI. Code-Level Changes & Fixes
+
+*   **Dependencies:** The `pathlib` module is now used for more robust and modern path manipulation.
+*   **Prompt Loading:** The `_load_prompts_from_file` method in `SearchWorker` was updated to include a check for the new `TITLE_PROMPT`.
+*   **Message Handling:** The `add_message_to_ui` method in `MainWindow` now includes a check for empty `text` to avoid creating empty message bubbles.
+*   **Session Management:** The `current_chat_id` state is now managed in `MainWindow` to track which conversation is active. Logic was added to `send_message`, `handle_response`, and `handle_error` to ensure messages are saved to the correct chat session.
+*   **Styling:** A custom-styled `QMenu` (`QWidgetActionMenu`) was created for the history panel's context menu to match the application's theme.
+
+------------------------
+-------continue---------
+------------------------
+
+System Instructions Prompt Changes: 
+
+### Overall Summary of Prompt Changes
+
+The evolution from the old to the new system instructions represents a significant leap in agent sophistication and strategic depth. The core theme is a shift from simple, direct commands to establishing **stronger agent personas with highly structured, transparent thinking processes**.
+
+*   **From Functional to Strategic:** The old prompts were functional but brittle. The new prompts force the agents to adopt specific personas (e.g., "Master Research Strategist," "Hyper-efficient Data Abstraction Agent") and follow detailed internal deliberation workflows. This results in more robust, reasoned, and debuggable outputs.
+*   **Introduction of Metadata & Classification:** The new `SEARCH_INTENT_PROMPT` introduces a critical `<search_type>` classification, allowing downstream processes (like URL ranking) to become context-aware and more effective.
+*   **Increased Flexibility and Intelligence:** The `VALIDATOR_PROMPT` was intentionally softened, moving from a "ruthless" filter to a more intelligent one that can recognize the value of contextually relevant information, preventing the premature rejection of useful data.
+*   **New Capabilities:** A new `TITLE_PROMPT` was added to support the application's new feature of automatically titling chat sessions.
+
+---
+
+### Prompt-by-Prompt Change Log
+
+#### 1. `NARRATOR_PROMPT`
+*   **Status:** Minor Refinement
+*   **Changes:**
+    *   The prompt now explicitly mentions the application name, "Chorus," to ground the agent's identity.
+    *   A new instruction was added to clarify the persona's purpose: `your persona is not overly technical, but instead to break down how the process is flowing and working to enhance the overall UX while user is waiting on the final end results.`
+*   **Impact:** This refines the narrator's role from a simple technical logger to a UX-focused component. The goal is to make the action log more reassuring and understandable for a non-technical user, improving the user experience during the wait time.
+
+---
+
+#### 2. `SEARCH_INTENT_PROMPT`
+*   **Status:** Major Overhaul
+*   **Changes:**
+    *   **Persona Change:** The persona was elevated from a "Research Strategist AI" to a "Master Research Strategist and Planner," emphasizing a more authoritative and strategic role.
+    *   **Mandatory `<search_type>` Classification:** This is a major new requirement. The agent must now classify the user's intent into one of several categories (`historical`, `financial`, `news`, etc.).
+    *   **Structured Thinking Block:** The old prompt had a vague "internal deliberation process." The new prompt mandates a highly detailed, seven-part `<thinking>` block that requires the agent to explicitly state the User Intent, Key Entities, Classification, Strategy, Constraints, Pitfalls, and Validation Method.
+    *   **Strategic Principles:** The old principles were simple instructions ("be specific"). The new "Guiding Principles" are more strategic, emphasizing efficiency, logical progression, and actionability.
+    *   **Temporal Context:** The new prompt is now injected with the current date and time, enabling the agent to accurately handle time-sensitive queries (e.g., "what happened yesterday?").
+    *   **Topic Quantity Guidance:** New, explicit rules were added to guide the agent on generating an appropriate number of search topics (typically 4-7, but up to 12 for follow-up queries), discouraging lazy or overly complex plans.
+*   **Impact:** This is the most significant change in the entire prompt suite. It transforms the agent from a simple keyword generator into a true strategic planner. The structured thinking process makes its reasoning transparent and forces a higher quality of output, while the `search_type` classification enables more intelligent search execution and source ranking in the main application logic.
+
+---
+
+#### 3. `VALIDATOR_PROMPT`
+*   **Status:** Significant Philosophical Shift
+*   **Changes:**
+    *   **Softened Strictness:** The core change is the addition of bolded, capitalized instructions explicitly telling the agent **NOT** to fail content just because it isn't a direct answer. It is now instructed to `BE WISE AND USE INTELECT` and pass data that could be `ONE PIECE OF A LARGER PUZZLE`.
+    *   **Temporal Awareness:** An instruction was added to account for the current year (`THE YEAR IS 2025`), preventing the agent from incorrectly failing content it perceives as "too new" based on its own knowledge cutoff.
+*   **Impact:** This change fundamentally alters the validator's role from a "ruthless" binary filter to an intelligent gatekeeper. The old prompt could easily discard valuable, context-rich articles that weren't a perfect match for a specific sub-query. The new prompt allows for more nuance, improving the richness of the data that gets passed to the final synthesis agent and preventing false negatives.
+
+---
+
+#### 4. `REFINER_PROMPT`
+*   **Status:** Unchanged
+*   **Changes:** No significant changes were made.
+*   **Impact:** This indicates that the original prompt for refining failed searches was already performing its function effectively and did not require modification.
+
+---
+
+#### 5. `ABSTRACTION_PROMPT`
+*   **Status:** Heavily Overhauled
+*   **Changes:**
+    *   **Stronger Persona & Principles:** The persona is now a "hyper-efficient, specialized Data Abstraction Agent," and new "Core Principles" (Query-Centric, Information Density, Aggressive Noise Rejection) were added to frame the task more strictly.
+    *   **More Forceful Instructions:** Vague instructions were replaced with more aggressive ones like `Ruthlessly extract` and `Discard all irrelevant information`.
+    *   **New "What to AVOID" Section:** This section provides clear negative constraints, explicitly telling the agent to avoid redundancy, vague language, and opinions.
+    *   **Enhanced Example with Meta-Instruction:** The example in the new prompt cleverly includes a commented-out `<!-- THOUGHT PROCESS -->` block. This shows the model *how to reason* about the task—why certain information was kept while other details (like the "new campus in Austin") were ignored.
+*   **Impact:** These changes are designed to produce much cleaner, denser, and more fact-based structured data. The meta-instruction in the example is a powerful technique that significantly improves the model's ability to distinguish between signal and noise, leading to higher quality input for the final synthesis agent.
+
+---
+
+#### 6. `SYNTHESIS_PROMPT`
+*   **Status:** Heavily Modified (Replaces implicit instruction)
+*   **Changes:**
+    *   The old system did not have a dedicated `SYNTHESIS_PROMPT`; this task was given implicitly after the search. The new prompt formalizes this critical step.
+    *   **Explicit Prohibition:** A new rule explicitly forbids the agent from discussing the data acquisition process (e.g., "I searched the web...").
+    *   **Guidance on Detail:** A new note was added at the end encouraging the agent to be `much more detailed and verbose` and not `overly simple or short`, using all the data provided to craft a comprehensive answer.
+*   **Impact:** This prompt creates a more reliable and focused synthesis agent. By preventing it from talking about the search process, the final answer is cleaner and more direct. The guidance on verbosity pushes back against the tendency of LLMs to give overly concise answers, resulting in a more informative and satisfying user experience.
+
+---
+
+#### 7. `MEMORY_SUMMARY_PROMPT`
+*   **Status:** Minor Refinement
+*   **Changes:**
+    *   The persona is slightly strengthened to be a "Memory Condenser agent."
+    *   The explanation of its purpose is clarified to include the goal of reducing token count while retaining the core information.
+*   **Impact:** A minor change that reinforces the agent's purpose, leading to slightly more consistent and concise summaries for long-term memory.
+
+---
+
+#### 8. `TITLE_PROMPT`
+*   **Status:** New
+*   **Changes:** This prompt did not exist in the old version.
+*   **Impact:** This is a net-new capability that supports the new feature of automatically generating titles for chat sessions based on the user's first message, which is then displayed in the persistent history panel.
+
+---
+
+#### 9. `MAIN_SEARCH_PROMPT`
+*   **Status:** Removed
+*   **Changes:** This prompt existed in the old system but is absent in the new one.
+*   **Impact:** The functionality of this prompt—deciding whether to search the web or answer from internal knowledge—has been completely absorbed and dramatically improved by the new, superior `SEARCH_INTENT_PROMPT`. The new system correctly assumes a search is the default action and focuses all its effort on creating the best possible plan from the outset, streamlining the logic.

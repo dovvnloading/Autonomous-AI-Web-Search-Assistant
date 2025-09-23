@@ -1,3 +1,14 @@
+Of course. Here is a revised README that reflects the significant architectural changes, new features, and enhanced agent capabilities of the updated application.
+
+The key changes focus on:
+1.  Highlighting the new **Persistent Chat History** feature.
+2.  Updating the **Architecture Deep Dive** to include the `HistoryManager` and the more sophisticated agent logic.
+3.  Revising the **Agent List** to include the new `TitleAgent` and update existing agent descriptions.
+4.  Updating the **Getting Started** section with the correct list of required Ollama models.
+5.  Rewriting the **Usage Guide** to match the new three-panel UI and its functionality.
+
+---
+
 # Chorus: A Multi-Agent AI Research Assistant
 
 ![Python](https://img.shields.io/badge/python-3.10+-blue.svg)
@@ -7,83 +18,82 @@
 ![Status](https://img.shields.io/badge/status-active-success.svg)
 
 ---
-Audio Overview: https://notebooklm.google.com/notebook/cbf76f05-313c-47a9-8a30-3beaf7f34610?artifactId=029bfd23-4d50-479d-a819-7a53a285b060
+Audio Overview of Original Version: https://notebooklm.google.com/notebook/cbf76f05-313c-47a9-8a30-3beaf7f34610?artifactId=029bfd23-4d50-479d-a819-7a53a285b060
 ---
 
-An open-source, privacy-first alternative to Perplexity & ChatGPT’s web search mode, powered by local models, a multi-agent architecture, and real-time web access that can be ran with little as 12gb of ram. Ran entriley on a single GEFORE RTX 3060 GPU.
+An open-source, privacy-first alternative to Perplexity & ChatGPT’s web search mode, powered by local models, a multi-agent architecture, and real-time web access. It can run effectively on consumer-grade hardware with as little as 12GB of VRAM (e.g., a single GEFORCE RTX 3060 GPU).
 
-Chorus doesn’t just answer questions—it *reasons*. It operates a sophisticated workflow where a **chorus of specialized AI agents** collaborate to plan, search, validate, abstract, and narrate the entire process of finding and synthesizing information. It runs entirely on your local machine, ensuring every interaction is secure, private, and radically transparent.
+Chorus doesn’t just answer questions—it *reasons*. It operates a sophisticated workflow where a **chorus of specialized AI agents** collaborate to plan, search, validate, abstract, and synthesize information. It runs entirely on your local machine, ensuring every interaction is secure, private, and radically transparent.
 
--   **Current, Factual Answers:** Fetches and synthesizes information from live web searches.
--   **Verifiable & Trustworthy:** Provides deterministic, accurate source citations for every answer.
+-   **Persistent Chat History:** Automatically saves all conversations. Load, rename, or delete past chats from a dedicated history panel.
+-   **Current, Factual Answers:** Fetches and synthesizes information from live web searches for up-to-the-minute accuracy.
+-   **Verifiable & Trustworthy:** Provides source citations for every answer, allowing you to trace information back to its origin.
 -   **100% Private:** No data, queries, or conversations ever leave your computer.
--   **Radical Transparency:** A unique **Narrator Agent** provides a human-like, running commentary on the AI's internal thought process.
--   **Hybrid Contextual Memory:** Remembers both short-term conversational flow and long-term semantic context.
+-   **Radical Transparency:** A unique **Narrator Agent** provides a human-like, running commentary on the AI's internal thought process in a live-updating action log.
+-   **Hybrid Contextual Memory:** Remembers both short-term conversational flow and long-term semantic context within each chat session.
 
 Think of it as your own **local, autonomous research team**: more accurate than a standard chatbot, more transparent than any commercial alternative, and completely in your control.
+
+**[NOTE: The screenshots and GIF below are from a previous version. Please update them to reflect the new UI with the history panel.]**
 
 ![Untitled video - Made with Clipchamp (9)](https://github.com/user-attachments/assets/1c3b0b4f-a18c-4712-95c7-d76377671aae)
 <img width="1468" height="850" alt="Screenshot 2025-09-23 134620" src="https://github.com/user-attachments/assets/65d8d6f2-ef53-477a-9656-75045cec0f74" />
 <img width="1468" height="850" alt="Screenshot 2025-09-23 134636" src="https://github.com/user-attachments/assets/b935a702-144d-4637-8fe8-efa4971a44c6" />
 
-
-
-
-
 ---
 
 ## Architectural Deep Dive: The Journey of a Query
 
-The sophistication of Chorus lies in its multi-agent, sequential, and recursive pipeline. Each user query initiates a journey through a series of specialized agents and logic gates, ensuring that the final output is the product of a rigorous, verifiable process.
+The sophistication of Chorus lies in its modular, multi-agent pipeline. Each user query initiates a journey through a series of specialized agents and logic gates, ensuring the final output is the product of a rigorous, verifiable process, with all interactions saved for future reference.
 
 ### Step 1: Strategic Deconstruction & Planning
 
-Before any action is taken, the system first seeks to understand the user's true intent. This is handled by a dedicated **`IntentAgent`**, which acts as a strategic mission planner.
+Before any action is taken, the **`IntentAgent`** acts as a master strategist.
 
--   **Deep Conversational Context:** The agent is provided with a rich, hybrid context from the `SemanticMemory`. This includes a guaranteed, verbatim recall of the last two conversational turns and a semantically-retrieved selection of older, relevant messages. This allows the system to accurately resolve ambiguous follow-up commands like "go deeper on that".
--   **Intelligent Abstraction:** The conversational history given to the `IntentAgent` is deliberately sanitized. Internal "thinking" processes (`<think>` blocks) from previous answers are stripped away, focusing the agent on the tangible information that was delivered to the user.
--   **Task Decomposition:** The `IntentAgent`'s primary output is a structured plan. It deconstructs a complex query into a series of discrete, machine-friendly search topics, transforming a nuanced human request into an actionable set of research objectives.
+-   **Deep Conversational Context:** The agent is provided with a rich, hybrid context from the `SemanticMemory`, loaded specifically for the active chat session. This includes a guaranteed recall of the last few turns and semantically-retrieved relevant messages from the session's history.
+-   **Search Type Classification:** The agent doesn't just generate search terms; it first classifies the user's intent (e.g., `historical`, `financial`, `tech`). This crucial metadata allows the search process to prioritize the most relevant types of sources.
+-   **Structured Plan Generation:** The `IntentAgent`'s primary output is a structured plan. It deconstructs a complex query into a series of discrete, machine-friendly search topics, transforming a nuanced human request into an actionable research strategy.
 
 ### Step 2: Intelligent & Adaptive Information Retrieval
 
-With a clear plan, the framework deploys its "scout" capabilities. This stage is designed to be adaptive and discerning, prioritizing signal over noise from the open web.
+With a clear plan, the framework deploys its "scout" capabilities, prioritizing signal over noise from the open web.
 
--   **Heuristic-Based Source Ranking:** The system uses a sophisticated ranking algorithm to prioritize search results *before* attempting to scrape them, applying a weighted score based on domain authority, information recency, and quality filtering against known low-signal domains.
--   **Resilient Search Strategy:** The system employs a "narrow-to-broad" fallback mechanism. If a highly-specific, domain-targeted search fails, it automatically re-executes the search on the wider web, ensuring resilience.
--   **Robust Content Extraction:** A two-stage extraction process uses a high-precision library (`trafilatura`) first, then falls back to a more aggressive HTML parser, guaranteeing that usable text is extracted from various web page structures.
+-   **Context-Aware Source Ranking:** Using the `search_type` from the planning phase, the system uses a sophisticated ranking algorithm to prioritize search results, applying a weighted score based on domain authority and relevance to the query's classification.
+-   **Resilient Search Strategy:** The system employs a "narrow-to-broad" fallback mechanism. If a domain-targeted search fails, it automatically re-executes the search on the wider web.
+-   **Robust Content Extraction:** A two-stage extraction process uses a high-precision library (`trafilatura`) first, then falls back to a more aggressive HTML parser to guarantee text is extracted from various web page structures.
 
-### Step 3: Autonomous Quality Control
+### Step 3: Intelligent Quality Control
 
-Chorus operates on a "zero-trust" principle: all information is considered unreliable until it passes a rigorous, independent validation stage.
+Chorus operates on a "trust but verify" principle: all information is considered unreliable until it passes an intelligent validation stage.
 
--   **The Dedicated `ValidatorAgent`:** A specialized agent with a single, uncompromising purpose: to validate content. Each scraped source is passed to this agent to be checked for relevance, depth, and alignment with the user's query.
--   **The Unforgiving Gate:** The validation process is binary. The `ValidatorAgent` must return a definitive `<pass>` tag. Any source that fails this check is immediately and irrevocably discarded from the data pool.
--   **Guaranteed Data-Source Integrity:** A crucial filtering function ensures that the final list of citations perfectly mirrors the data that was actually validated and used, making every reference directly traceable.
+-   **The Dedicated `ValidatorAgent`:** Each scraped source is passed to this agent to be checked for relevance and depth.
+-   **Nuanced Filtering:** The validation process is no longer a ruthless binary gate. The `ValidatorAgent` is now instructed to pass content that, while not a direct answer, provides valuable context that contributes to the larger puzzle, preventing the premature rejection of useful data.
 
 ### Step 4: Multi-Stage Synthesis & Self-Correction
 
-The system is not a linear pipeline; it is a dynamic framework with internal feedback loops that allow it to adapt and recover from failure.
+The system is a dynamic framework with internal feedback loops that allow it to adapt and recover from failure.
 
--   **The Refinement Loop (Failure Recovery):** If the Quality Control gate rejects *all* initial sources, the system triggers a recovery protocol, invoking a **`RefinerAgent`**. This agent is given the original failed query *and the specific reasons why sources were rejected* to construct a new, more intelligent search plan.
--   **The Augmentation Loop (Information Gaps):** The final **`SynthesisAgent`** can request more information. If it determines a critical piece of information is missing, it can pause its own process and issue a request for an `<additional_search>`, which triggers a new, targeted search-and-validate cycle.
+-   **The Refinement Loop (Failure Recovery):** If all initial sources are rejected, the system invokes a **`RefinerAgent`**. This agent is given the failed query and the specific reasons for rejection to construct a new, more intelligent search plan.
+-   **The Augmentation Loop (Information Gaps):** The final **`SynthesisAgent`** can request more information. If it determines a critical detail is missing, it can issue a request for an `<additional_search>`, triggering a new, targeted search-and-validate cycle.
 
-### Step 5: Persistent Contextual Awareness
+### Step 5: Persistent & Semantic Memory
 
-Underpinning the entire process is the `SemanticMemory` class, which serves as the system's working memory and long-term knowledge base.
+Underpinning the entire application is a dual-component memory system that provides both long-term persistence and powerful in-session context.
 
--   **Hybrid Memory Model:** Combines the perfect recall of a short-term conversational queue with the power of long-term semantic retrieval, grounding every action in both immediate and broader context.
--   **Conceptual Retrieval:** By using vector embeddings, the memory operates on conceptual meaning, not just keywords, allowing it to connect ideas across multiple conversational turns.
+-   **`HistoryManager` (The Librarian):** This new class is responsible for all file I/O, saving every chat session—including user prompts, AI responses, and memory summaries—to a local JSON file. It manages the creation, loading, and deletion of conversations.
+-   **`SemanticMemory` (The Working Memory):** When a chat is loaded, its history is used to "hydrate" the `SemanticMemory` class. This class uses vector embeddings to operate on conceptual meaning, not just keywords, allowing it to provide deep contextual understanding for the agents working on the current query.
 
 ## The Chorus of Agents
 
 Chorus's intelligence comes from a structured workflow orchestrated between several specialized AI agents.
 
-1.  **Intent Agent (The Planner):** Analyzes the user's query and conversational context to produce a clear, actionable search plan.
-2.  **Validator Agent (The Quality Gatekeeper):** Critically evaluates each scraped web source individually to return a `<pass>` or `<fail>` judgment.
-3.  **Refiner Agent (The Problem Solver):** If all initial results are rejected, this agent analyzes the failure feedback and generates an improved search plan.
-4.  **Abstraction Agent (The Summarizer):** Processes each *validated* source, extracting key facts and structuring the raw text into a clean format.
-5.  **Synthesis Agent (The Author):** The main agent that receives the structured data from all validated sources and synthesizes it into a final, cohesive, user-facing answer.
-6.  **Narrator Agent (The Commentator):** A unique feature for transparency. This lightweight agent observes the entire process, providing a running, human-like monologue in the Action Log that explains what the system is doing at each step.
+1.  **Intent Agent (The Planner):** Analyzes the user's query and context to produce a classified, actionable search plan.
+2.  **Validator Agent (The Intelligent Filter):** Critically evaluates each scraped web source, passing content that is either directly relevant or provides valuable context.
+3.  **Refiner Agent (The Problem Solver):** If all initial results are rejected, this agent analyzes the failure feedback to generate an improved search plan.
+4.  **Abstraction Agent (The Data Extractor):** Processes each *validated* source, ruthlessly extracting key facts and structuring the raw text into a clean, dense format.
+5.  **Synthesis Agent (The Author):** Receives structured data from all validated sources and synthesizes it into a final, cohesive, user-facing answer.
+6.  **Narrator Agent (The Commentator):** Provides a running, human-like monologue in the Action Log, transparently explaining what the system is doing at each step.
+7.  **Title Agent (The Archivist):** A new, lightweight agent that runs in the background to generate a concise title for new conversations, keeping the chat history organized.
 
 ## Technology Stack
 
@@ -102,17 +112,20 @@ Follow these instructions to get Chorus running on your local machine.
 
 1.  **Python:** Ensure you have Python 3.10 or newer installed.
 2.  **Ollama:** You must have [Ollama](https://ollama.com/) installed and running on your system.
-3.  **Required Ollama Models:** The application relies on specific models for its agentic stack. Pull them using the following commands in your terminal. **Note:** The application can run effectively on a single GPU with ~12GB of VRAM (e.g., GEFORE RTX 3060).
+3.  **Required Ollama Models:** The application relies on a specific set of models for its agentic stack. Pull them using the following commands. **Note:** A GPU with ~12GB of VRAM is recommended to run the full stack smoothly.
 
     ```bash
-    # For main synthesis and high-powered agents
+    # For main synthesis and refinement agents (largest model)
     ollama pull qwen3:14b
 
-    # For planning, abstraction, and validation agents
+    # For planning, abstraction, and validation agents (medium model)
     ollama pull qwen3:8b
-
-    # For the fast, lightweight Narrator agent
+    
+    # For memory summaries (medium model)
     ollama pull qwen2.5:7b-instruct
+
+    # For fast, lightweight narration and title generation (smallest model)
+    ollama pull qwen2.5:3b
 
     # For generating vector embeddings for semantic memory
     ollama pull nomic-embed-text
@@ -127,9 +140,9 @@ Follow these instructions to get Chorus running on your local machine.
     ```
 
 2.  **Install Dependencies:**
-    It is recommended to use a virtual environment.
+    It is highly recommended to use a virtual environment.
     ```bash
-    # Create and activate a virtual environment (optional but recommended)
+    # Create and activate a virtual environment
     python -m venv venv
     source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
 
@@ -146,16 +159,17 @@ Follow these instructions to get Chorus running on your local machine.
 Once the prerequisites are met and dependencies are installed, start the application:
 
 ```bash
-python main.py 
-# (Or whatever you have named the main script)
+python chorus.py 
 ```
 
 ## Usage Guide
 
--   **Chat Interface:** The main window on the left is where you interact with the AI.
--   **Action Log:** The panel on the right provides a detailed, real-time log of the AI's internal state. Look for the *italic blue entries* from the **Narrator Agent** for a high-level summary.
+-   **Three-Panel Layout:**
+    -   **History Panel (Left):** Lists all your saved conversations. Click an item to load the chat. Right-click for options to **Rename** or **Delete**.
+    -   **Chat Interface (Center):** The main window where you interact with the AI.
+    -   **Action Log (Right):** Provides a detailed, real-time log of the AI's internal process. Look for the *italic blue entries* from the **Narrator Agent** for a high-level summary.
+-   **Starting a New Chat:** Click the "**＋ New Chat**" button in the history panel header to begin a new, unsaved conversation. The chat will be automatically saved and titled after you send your first message.
 -   **Expandable Details:** Responses may include "Thinking Process" and "Sources" buttons. Click these to see the agent's reasoning and view the source citations.
--   **New Chat:** The "New Chat" button clears the conversation and the AI's memory, allowing you to start a fresh session.
 
 ## Contributing
 

@@ -136,64 +136,13 @@ If you see your values reflected in the first section, then Chorus is built for 
 
 ## Getting Started
 
-Follow these instructions to get Chorus running on your local machine.
-
-#### Prerequisites
-
-1.  **Python:** Ensure you have Python 3.10 or newer installed.
-2.  **Ollama:** You must have [Ollama](https://ollama.com/) installed and running on your system.
-3.  **Required Ollama Models:** The application relies on a specific set of models for its agentic stack. Pull them using the following commands. **Note:** A GPU with ~12GB of VRAM is recommended to run the full stack smoothly.
-
-    ```bash
-    # For main synthesis and refinement agents (largest model)
-    ollama pull qwen3:14b
-
-    # For planning, abstraction, and validation agents (medium model)
-    ollama pull qwen3:8b
-    
-    # For memory summaries (medium model)
-    ollama pull qwen2.5:7b-instruct
-
-    # For fast, lightweight narration and title generation (smallest model)
-    ollama pull qwen2.5:3b
-
-    # For generating vector embeddings for semantic memory
-    ollama pull nomic-embed-text
-    ```
+https://github.com/dovvnloading/Autonomous-AI-Web-Search-Assistant/blob/main/Sys_Requirements.md
     
 ---
 
 #### Installation
 
-1.  **Clone the Repository:**
-    ```bash
-    git clone https://github.com/YOUR_USERNAME/Chorus.git
-    cd Chorus
-    ```
-
-2.  **Install Dependencies:**
-    It is highly recommended to use a virtual environment.
-    ```bash
-    # Create and activate a virtual environment
-    python -m venv venv
-    source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
-
-    # Install the required packages
-    pip install -r requirements.txt
-    ```
-    If a `requirements.txt` file is not available, install packages directly:
-    ```bash
-    pip install PySide6 ollama numpy requests duckduckgo-search beautifulsoup4 trafilatura markdown2
-    ```
----
-
-#### Running the Application
-
-Once the prerequisites are met and dependencies are installed, start the application:
-
-```bash
-python chorus.py 
-```
+https://github.com/dovvnloading/Autonomous-AI-Web-Search-Assistant/blob/main/VS_Installation.md
 
 ---
 

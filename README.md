@@ -7,7 +7,7 @@
 ![Status](https://img.shields.io/badge/status-active-success.svg)
 
 ---
-Audio Overview: https://notebooklm.google.com/notebook/cbf76f05-313c-47a9-8a30-3beaf7f34610?artifactId=029bfd23-4d50-479d-a819-7a53a285b060
+Audio Overview: https://tinyurl.com/bdhyvvp3
 ---
 
 An open-source, privacy-first alternative to Perplexity & ChatGPT’s web search mode, powered by local models, a multi-agent architecture, and real-time web access. It can run effectively on consumer-grade hardware with as little as 12GB of VRAM (e.g., a single GEFORCE RTX 3060 GPU).

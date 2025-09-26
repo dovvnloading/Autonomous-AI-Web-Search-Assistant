@@ -235,9 +235,13 @@ The single-file application was broken down into multiple Python modules, each w
 *   **Session Management:** The `current_chat_id` state is now managed in `MainWindow` to track which conversation is active. Logic was added to `send_message`, `handle_response`, and `handle_error` to ensure messages are saved to the correct chat session.
 *   **Styling:** A custom-styled `QMenu` (`QWidgetActionMenu`) was created for the history panel's context menu to match the application's theme.
 
+
+
 ------------------------
 -------continue---------
 ------------------------
+
+
 
 System Instructions Prompt Changes: 
 
@@ -333,3 +337,103 @@ The evolution from the old to the new system instructions represents a significa
 *   **Status:** Removed
 *   **Changes:** This prompt existed in the old system but is absent in the new one.
 *   **Impact:** The functionality of this prompt—deciding whether to search the web or answer from internal knowledge—has been completely absorbed and dramatically improved by the new, superior `SEARCH_INTENT_PROMPT`. The new system correctly assumes a search is the default action and focuses all its effort on creating the best possible plan from the outset, streamlining the logic.
+
+
+
+------------------------------------------
+9_25_25
+------------------------------------------
+
+
+
+### High-Level Summary of Changes
+
+This update introduces significant new user-facing features and major under-the-hood enhancements focused on **robustness, performance, and user control**.
+
+The two headline features are:
+1.  **User-Selectable Modes:** A new UI toggle allows users to switch between the default "Search Mode" (with the full RAG pipeline) and a new "Chat Mode" for direct, search-free interaction with the LLM.
+2.  **Direct URL Analysis:** Users can now paste a URL directly into the input field to have the system scrape, analyze, and answer questions about that specific page, bypassing the search planning phase.
+
+Under the hood, the application has been hardened significantly with the implementation of **timeouts and retry mechanisms for all Ollama API calls**, preventing hangs and improving reliability. Configuration has also been expanded for finer control over performance.
+
+---
+
+### I. Major New Features
+
+#### 1. Search vs. Chat Mode
+A user-selectable mode has been introduced, allowing for two distinct types of interaction:
+*   **Search Mode (Default):** The standard, multi-agent RAG pipeline that plans, searches the web, validates, and synthesizes information.
+*   **Chat Mode:** A direct-to-LLM mode that bypasses the entire search and retrieval pipeline. This is ideal for general conversation, creative tasks, or querying the model's internal knowledge without web access.
+    *   **Implementation:**
+        *   **UI (`uimain_window.py`):** A new toggle button (`mode_toggle_button`) has been added to the footer, allowing users to switch between "🌐 Search Mode" and "💬 Chat Mode". The input field placeholder text updates accordingly.
+        *   **State Management (`uimain_window.py`):** A new state variable, `self.current_mode`, tracks the selected mode.
+        *   **Core Logic (`core_logic.py`):** The `SearchWorker` now accepts a `mode` parameter. Its `run()` method contains a new primary conditional branch: if `mode` is "chat", it skips directly to knowledge-based generation; if `mode` is "search", it executes the full RAG pipeline.
+
+#### 2. Direct URL Analysis
+The system can now automatically detect when a user provides a URL, triggering a specialized workflow.
+*   **Functionality:** If a user's prompt contains a URL, the system will bypass the `IntentAgent` and directly scrape the content of that single URL. It will then proceed with the abstraction and synthesis steps to answer questions about the page's content.
+    *   **Implementation:**
+        *   **URL Detection (`core_logic.py`):** A new `_find_url_in_query()` helper function was added.
+        *   **Intent Bypass (`core_logic.py`):** The `_get_search_plan()` method now first checks for a URL. If found, it immediately returns a plan with `search_type="direct"`, skipping the expensive call to the `IntentAgent`.
+        *   **Specialized Execution (`core_logic.py`):** The `execute_search_plan()` method now has a specific handler for `search_type="direct"` to perform a single scrape instead of a web search. The `run()` method also bypasses the validation step for direct URL scrapes.
+
+---
+
+### II. Robustness & Performance Enhancements
+
+This update introduces major stability improvements, making the application far more resilient to model or network issues.
+
+#### 1. Timeout and Retry Logic for All Ollama Calls
+All blocking calls to the Ollama API have been wrapped in robust handlers to prevent the application from hanging indefinitely.
+*   **Implementation (`core_logic.py`):**
+    *   The `concurrent.futures` library is now used to run Ollama API calls in a separate thread with a configurable timeout.
+    *   **`get_ollama_response()`:** Now uses `ThreadPoolExecutor` with a `OLLAMA_DEFAULT_TIMEOUT` (10 minutes). It will retry up to 2 times on timeout or failure.
+    *   **`_validate_scraped_content_batch()`:** The validator, which is more prone to issues, now has a much shorter `OLLAMA_VALIDATION_TIMEOUT` (90 seconds) and will retry up to 3 times per source. This prevents a single faulty source validation from stalling the entire process.
+    *   **`_structure_scraped_data_batch()`:** The abstraction agent now includes a retry loop (2 attempts) to handle intermittent failures.
+
+#### 2. More Nuanced Validation Logic
+The logic for determining if a search was "successful" after validation has been improved.
+*   **Implementation (`core_logic.py`):**
+    *   The condition for proceeding to synthesis is now more flexible: `(num_passed >= 2) or (num_scraped <= 2 and num_passed >= 1)`. This means the process can continue if it finds at least one good source when only one or two were scraped, which is a common scenario. This logic is applied to both the initial and refined search steps.
+
+#### 3. Optimized Scraping Content Length
+*   **Implementation (`core_logic.py`):** In `scrape_with_enhanced_extraction()`, the maximum number of characters scraped from a single page has been reduced from `12000` to `4000`. This reduces the token load on the abstraction and synthesis models, improving performance and helping to stay within context limits.
+
+---
+
+### III. UI & UX Improvements
+
+#### 1. Redesigned Footer
+The footer area has been redesigned for better organization and to accommodate the new mode toggle.
+*   **Implementation (`uimain_window.py`):**
+    *   The `status_label` and `timer_label` have been moved up into a new `mode_status_layout` alongside the new mode toggle button.
+    *   A new `bottom_bar_layout` was created at the very bottom of the window to house a new disclaimer message and the `QSizeGrip`.
+    *   **Disclaimer:** A small, italicized label now sits in the footer: *"Please double check vital details. We strive for reliability but no system is perfect."*
+
+---
+
+### IV. Core Logic & Pipeline Refinements
+
+#### 1. Prompt Loading Refactored
+*   **Implementation:** The `load_prompts_from_file` function was moved out of the `SearchWorker` class and into the top level of `core_logic.py`. It is now called once at startup in `MainWindow.__init__`, and the loaded prompts are passed to workers as needed. This is more efficient as the file is now read only once per application launch, not once per query.
+
+#### 2. Improved Memory Summarization
+*   **Implementation (`core_logic.py`):** The logic in the `run()` method for creating the `summary_for_memory` is now smarter. If a response was generated without web sources (e.g., in Chat Mode), it creates a simpler, more direct summary of the conversation turn instead of invoking the `MemorySummaryAgent`.
+
+#### 3. Better Context in Chat History
+*   **Implementation (`core_logic.py`):** In the `run()` method, the `retrieve_relevant_messages` call now requests the `last_n=4` messages instead of 2, providing slightly more conversational context to the agents.
+
+---
+
+### V. Configuration Changes (`config.py`)
+
+*   **Model Upgrade:**
+    *   `SYNTHESIS_MODEL` has been upgraded from `qwen3:8b` to **`qwen3:14b`**, dedicating more power to generating the final, high-quality answer.
+*   **Increased Search Scope:**
+    *   `SCRAPE_TOP_N_RESULTS` was increased from `8` to **`10`**.
+    *   `MAX_SOURCES_TO_SCRAPE` was increased from `3` to **`5`**.
+    This allows the system to consider a wider pool of information before validation.
+*   **New Timeout Constants:**
+    *   `OLLAMA_VALIDATION_TIMEOUT = 90`
+    *   `OLLAMA_DEFAULT_TIMEOUT = 600`
+    These new constants centralize the timeout values used in the new robustness features.
